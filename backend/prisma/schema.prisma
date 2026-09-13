@@ -1,0 +1,227 @@
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id            Int            @id @default(autoincrement())
+  email         String         @unique
+  passwordHash  String
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  profile       Profile?
+  resumes       Resume[]
+  resumeVersions ResumeVersion[]
+  analyses      ResumeAnalysis[]
+  userSkills    UserSkill[]
+  savedJobs     SavedJob[]
+  applications  Application[]
+  outreachEmails OutreachEmail[]
+  videos        Video[]
+  notifications Notification[]
+}
+
+model Profile {
+  id                Int      @id @default(autoincrement())
+  userId            Int      @unique
+  fullName          String
+  phone             String?
+  location          String?
+  bio               String?
+  linkedinUrl       String?
+  githubUrl         String?
+  portfolioUrl      String?
+  careerPreferences String?  // Stored as JSON string
+  education         String?  // Stored as JSON string
+  experience        String?  // Stored as JSON string
+  projects          String?  // Stored as JSON string
+  certifications    String?  // Stored as JSON string
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Resume {
+  id               Int             @id @default(autoincrement())
+  userId           Int
+  title            String
+  originalFilename String
+  filePath         String
+  fileType         String
+  parsedContent    String?         // Stored as JSON string
+  isPrimary        Boolean         @default(false)
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+  user             User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  versions         ResumeVersion[]
+  analyses         ResumeAnalysis[]
+}
+
+model ResumeVersion {
+  id             Int          @id @default(autoincrement())
+  resumeId       Int
+  userId         Int
+  versionName    String
+  targetJobTitle String?
+  targetCompany  String?
+  content        String       // Stored as JSON string
+  createdAt      DateTime     @default(now())
+  resume         Resume       @relation(fields: [resumeId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  applications   Application[]
+}
+
+model ResumeAnalysis {
+  id              Int      @id @default(autoincrement())
+  userId          Int
+  resumeId        Int?
+  jobTitle        String
+  company         String?
+  jobDescription  String
+  atsScore        Float
+  matchedKeywords String?  // JSON string
+  missingKeywords String?  // JSON string
+  suggestions     String?  // JSON string
+  createdAt       DateTime @default(now())
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  resume          Resume?  @relation(fields: [resumeId], references: [id], onDelete: SetNull)
+}
+
+model Skill {
+  id       Int    @id @default(autoincrement())
+  name     String @unique
+  category String @default("Technical")
+}
+
+model UserSkill {
+  id               Int    @id @default(autoincrement())
+  userId           Int
+  skillName        String
+  proficiencyLevel String @default("Intermediate")
+  yearsExperience  Int    @default(1)
+  user             User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, skillName])
+}
+
+model Job {
+  id              Int         @id @default(autoincrement())
+  title           String
+  company         String
+  location        String
+  type            String      @default("Full-Time")
+  experienceLevel String      @default("Entry-Level")
+  salaryRange     String?
+  description     String
+  requirements    String?     // JSON array string
+  applicationUrl  String?
+  source          String      @default("Internal")
+  createdAt       DateTime    @default(now())
+  savedJobs       SavedJob[]
+  jobSkills       JobSkill[]
+  applications    Application[]
+}
+
+model JobSkill {
+  id         Int     @id @default(autoincrement())
+  jobId      Int
+  skillName  String
+  isRequired Boolean @default(true)
+  job        Job     @relation(fields: [jobId], references: [id], onDelete: Cascade)
+}
+
+model SavedJob {
+  id      Int      @id @default(autoincrement())
+  userId  Int
+  jobId   Int
+  savedAt DateTime @default(now())
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  job     Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, jobId])
+}
+
+model Application {
+  id              Int                      @id @default(autoincrement())
+  userId          Int
+  jobId           Int?
+  companyName     String
+  jobTitle        String
+  status          String                   @default("Saved") // Saved, Applied, Interview, Selected, Rejected, Withdrawn
+  appliedDate     String?
+  resumeVersionId Int?
+  outreachEmailId Int?
+  videoId         Int?
+  notes           String?
+  createdAt       DateTime                 @default(now())
+  updatedAt       DateTime                 @updatedAt
+  user            User                     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  job             Job?                     @relation(fields: [jobId], references: [id], onDelete: SetNull)
+  resumeVersion   ResumeVersion?           @relation(fields: [resumeVersionId], references: [id], onDelete: SetNull)
+  outreachEmails  OutreachEmail[]
+  statusHistory   ApplicationStatusHistory[]
+}
+
+model Recruiter {
+  id             Int             @id @default(autoincrement())
+  companyName    String
+  name           String
+  title          String?
+  email          String
+  linkedinUrl    String?
+  verified       Boolean         @default(false)
+  createdAt      DateTime        @default(now())
+  outreachEmails OutreachEmail[]
+}
+
+model OutreachEmail {
+  id             Int          @id @default(autoincrement())
+  userId         Int
+  applicationId  Int?
+  recruiterId    Int?
+  recipientEmail String
+  subject        String
+  body           String
+  status         String       @default("Draft") // Draft, Scheduled, Sent, Failed
+  sentAt         DateTime?
+  createdAt      DateTime     @default(now())
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  application    Application? @relation(fields: [applicationId], references: [id], onDelete: SetNull)
+  recruiter      Recruiter?   @relation(fields: [recruiterId], references: [id], onDelete: SetNull)
+}
+
+model Video {
+  id              Int      @id @default(autoincrement())
+  userId          Int
+  title           String
+  filePath        String
+  durationSeconds Int      @default(0)
+  fileSize        Int      @default(0)
+  createdAt       DateTime @default(now())
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Notification {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  title     String
+  message   String
+  type      String   @default("info")
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model ApplicationStatusHistory {
+  id             Int         @id @default(autoincrement())
+  applicationId  Int
+  previousStatus String?
+  newStatus      String
+  notes          String?
+  changedAt      DateTime    @default(now())
+  application    Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+}
