@@ -36,8 +36,33 @@ const upload = multer({
   }
 });
 
+const handleResumeUpload = (req: AuthenticatedRequest, res: Response, next: Function) => {
+  upload.single('resume')(req, res, (err: any) => {
+    if (err) {
+      if (err instanceof multer.MulterError) {
+        if (err.code === 'LIMIT_FILE_SIZE') {
+          return res.status(400).json({ error: 'Resume file exceeds 10MB size limit.' });
+        }
+        return res.status(400).json({ error: `Upload error: ${err.message}` });
+      }
+      return res.status(400).json({ error: err.message || 'Invalid resume file.' });
+    }
+    next();
+  });
+};
+
+function safeJsonParse<T>(val: any, fallback: T): T {
+  if (!val) return fallback;
+  if (typeof val !== 'string') return val;
+  try {
+    return JSON.parse(val);
+  } catch {
+    return fallback;
+  }
+}
+
 // POST /api/resumes/upload
-router.post('/upload', authenticateToken, upload.single('resume'), async (req: AuthenticatedRequest, res: Response) => {
+router.post('/upload', authenticateToken, handleResumeUpload, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const userId = req.user!.userId;
     if (!req.file) {
@@ -83,6 +108,66 @@ router.post('/upload', authenticateToken, upload.single('resume'), async (req: A
   }
 });
 
+// GET /api/resumes/versions/:versionId
+router.get('/versions/:versionId', authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const userId = req.user!.userId;
+    const versionId = parseInt(req.params.versionId, 10);
+    if (isNaN(versionId)) return res.status(400).json({ error: 'Invalid version ID' });
+
+    const version = await prisma.resumeVersion.findFirst({
+      where: { id: versionId, userId }
+    });
+
+    if (!version) return res.status(404).json({ error: 'Resume version not found' });
+
+    return res.json({
+      version: {
+        ...version,
+        content: safeJsonParse(version.content, null)
+      }
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT /api/resumes/versions/:versionId
+router.put('/versions/:versionId', authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const userId = req.user!.userId;
+    const versionId = parseInt(req.params.versionId, 10);
+    if (isNaN(versionId)) return res.status(400).json({ error: 'Invalid version ID' });
+
+    const { versionName, targetJobTitle, targetCompany, content } = req.body;
+
+    const existing = await prisma.resumeVersion.findFirst({
+      where: { id: versionId, userId }
+    });
+    if (!existing) return res.status(404).json({ error: 'Resume version not found' });
+
+    const updated = await prisma.resumeVersion.update({
+      where: { id: versionId },
+      data: {
+        versionName: versionName !== undefined ? versionName : existing.versionName,
+        targetJobTitle: targetJobTitle !== undefined ? targetJobTitle : existing.targetJobTitle,
+        targetCompany: targetCompany !== undefined ? targetCompany : existing.targetCompany,
+        content: content ? (typeof content === 'string' ? content : JSON.stringify(content)) : existing.content
+      }
+    });
+
+    return res.json({
+      message: 'Resume version updated successfully',
+      version: {
+        ...updated,
+        content: safeJsonParse(updated.content, null)
+      }
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 // GET /api/resumes
 router.get('/', authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -95,10 +180,74 @@ router.get('/', authenticateToken, async (req: AuthenticatedRequest, res: Respon
 
     const formatted = resumes.map(r => ({
       ...r,
-      parsedContent: r.parsedContent ? JSON.parse(r.parsedContent) : null
+      parsedContent: safeJsonParse(r.parsedContent, null)
     }));
 
     return res.json({ resumes: formatted });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/resumes/:id/versions
+router.get('/:id/versions', authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const userId = req.user!.userId;
+    const resumeId = parseInt(req.params.id, 10);
+    if (isNaN(resumeId)) return res.status(400).json({ error: 'Invalid resume ID' });
+
+    const resume = await prisma.resume.findFirst({
+      where: { id: resumeId, userId }
+    });
+    if (!resume) return res.status(404).json({ error: 'Resume not found' });
+
+    const versions = await prisma.resumeVersion.findMany({
+      where: { resumeId, userId },
+      orderBy: { createdAt: 'desc' }
+    });
+
+    const formatted = versions.map(v => ({
+      ...v,
+      content: safeJsonParse(v.content, null)
+    }));
+
+    return res.json({ versions: formatted });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/resumes/:id/versions
+router.post('/:id/versions', authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const userId = req.user!.userId;
+    const resumeId = parseInt(req.params.id, 10);
+    if (isNaN(resumeId)) return res.status(400).json({ error: 'Invalid resume ID' });
+    const { versionName, targetJobTitle, targetCompany, content } = req.body;
+
+    const resume = await prisma.resume.findFirst({
+      where: { id: resumeId, userId }
+    });
+    if (!resume) return res.status(404).json({ error: 'Resume not found' });
+
+    const version = await prisma.resumeVersion.create({
+      data: {
+        resumeId,
+        userId,
+        versionName: versionName || `Optimized Version ${new Date().toLocaleDateString()}`,
+        targetJobTitle: targetJobTitle || null,
+        targetCompany: targetCompany || null,
+        content: content ? (typeof content === 'string' ? content : JSON.stringify(content)) : (resume.parsedContent || '{}')
+      }
+    });
+
+    return res.status(201).json({
+      message: 'Resume version created successfully',
+      version: {
+        ...version,
+        content: safeJsonParse(version.content, null)
+      }
+    });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
   }
@@ -108,7 +257,7 @@ router.get('/', authenticateToken, async (req: AuthenticatedRequest, res: Respon
 router.get('/:id', authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const userId = req.user!.userId;
-    const id = parseInt(req.params.id);
+    const id = parseInt(req.params.id, 10);
 
     const resume = await prisma.resume.findFirst({
       where: { id, userId },
@@ -132,11 +281,16 @@ router.get('/:id', authenticateToken, async (req: AuthenticatedRequest, res: Res
 router.put('/:id', authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const userId = req.user!.userId;
-    const id = parseInt(req.params.id);
+    const id = parseInt(req.params.id, 10);
     const { title, parsedContent } = req.body;
 
-    const resume = await prisma.resume.updateMany({
-      where: { id, userId },
+    const existing = await prisma.resume.findFirst({ where: { id, userId } });
+    if (!existing) {
+      return res.status(404).json({ error: 'Resume not found' });
+    }
+
+    await prisma.resume.update({
+      where: { id },
       data: {
         title,
         parsedContent: parsedContent ? JSON.stringify(parsedContent) : undefined
@@ -153,7 +307,8 @@ router.put('/:id', authenticateToken, async (req: AuthenticatedRequest, res: Res
 router.post('/:id/optimize', authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const userId = req.user!.userId;
-    const id = parseInt(req.params.id);
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) return res.status(400).json({ error: 'Invalid resume ID' });
     const { jobDescription, targetJobTitle, targetCompany } = req.body;
 
     const resume = await prisma.resume.findFirst({ where: { id, userId } });
@@ -167,22 +322,95 @@ router.post('/:id/optimize', authenticateToken, async (req: AuthenticatedRequest
       targetJobTitle || "Software Engineer"
     );
 
+    const completeOptimizedResume = optimized.optimized_content || optimized;
+
     // Create a new Resume Version
     const version = await prisma.resumeVersion.create({
       data: {
         resumeId: id,
         userId,
-        versionName: `Optimized for ${targetJobTitle || 'Target Role'} @ ${targetCompany || 'Target Company'}`,
-        targetJobTitle,
-        targetCompany,
-        content: JSON.stringify(optimized)
+        versionName: `Optimized for ${targetJobTitle || 'Target Role'}${targetCompany ? ` @ ${targetCompany}` : ''}`,
+        targetJobTitle: targetJobTitle || null,
+        targetCompany: targetCompany || null,
+        content: JSON.stringify(completeOptimizedResume)
       }
     });
+
+    const optPayload = {
+      ...optimized,
+      ...completeOptimizedResume,
+      optimized_content: completeOptimizedResume,
+      original_content: optimized.original_content || currentContent,
+      matched_skills: optimized.matched_skills || [],
+      missing_keywords: optimized.missing_keywords || [],
+      suggested_rewrites: optimized.suggested_rewrites || []
+    };
 
     return res.json({
       message: 'Resume optimized successfully',
       versionId: version.id,
-      optimizedContent: optimized
+      version: {
+        ...version,
+        content: completeOptimizedResume
+      },
+      optimizedContent: optPayload,
+      matchedSkills: optimized.matched_skills || [],
+      missingKeywords: optimized.missing_keywords || [],
+      suggestedRewrites: optimized.suggested_rewrites || [],
+      optimizationNotes: optimized.optimization_notes || []
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/resumes/:id/analyze
+router.post('/:id/analyze', authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const userId = req.user!.userId;
+    const id = parseInt(req.params.id);
+    const { targetJobDescription } = req.body;
+
+    const resume = await prisma.resume.findFirst({ where: { id, userId } });
+    if (!resume) return res.status(404).json({ error: 'Resume not found' });
+
+    const currentContent = resume.parsedContent ? JSON.parse(resume.parsedContent) : {};
+    const rawText = currentContent.raw_text || `${currentContent.summary || ''} ${(currentContent.skills || []).join(' ')}`;
+
+    const analysis = await providers.ai.analyzeResume(
+      currentContent,
+      rawText,
+      targetJobDescription || ""
+    );
+
+    return res.json({
+      message: 'Resume quality analysis completed',
+      analysis
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/resumes/analyze-raw
+router.post('/analyze-raw', authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { resumeData, rawText, targetJobDescription } = req.body;
+
+    if (!resumeData && !rawText) {
+      return res.status(400).json({ error: 'Please provide resume data or resume text for analysis.' });
+    }
+
+    const dataObj = resumeData || { summary: rawText, skills: [], experience: [], education: [] };
+    const analysis = await providers.ai.analyzeResume(
+      dataObj,
+      rawText || "",
+      targetJobDescription || ""
+    );
+
+    return res.json({
+      message: 'Resume quality analysis completed',
+      analysis
     });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });

@@ -149,9 +149,12 @@ model Application {
   id              Int                      @id @default(autoincrement())
   userId          Int
   jobId           Int?
+  externalJobId   String?
   companyName     String
   jobTitle        String
-  status          String                   @default("Saved") // Saved, Applied, Interview, Selected, Rejected, Withdrawn
+  location        String?
+  jobUrl          String?
+  status          String                   @default("SAVED") // SAVED, APPLIED, ASSESSMENT, INTERVIEW, OFFER, REJECTED, WITHDRAWN
   appliedDate     String?
   resumeVersionId Int?
   outreachEmailId Int?
@@ -179,19 +182,26 @@ model Recruiter {
 }
 
 model OutreachEmail {
-  id             Int          @id @default(autoincrement())
-  userId         Int
-  applicationId  Int?
-  recruiterId    Int?
-  recipientEmail String
-  subject        String
-  body           String
-  status         String       @default("Draft") // Draft, Scheduled, Sent, Failed
-  sentAt         DateTime?
-  createdAt      DateTime     @default(now())
-  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  application    Application? @relation(fields: [applicationId], references: [id], onDelete: SetNull)
-  recruiter      Recruiter?   @relation(fields: [recruiterId], references: [id], onDelete: SetNull)
+  id                Int          @id @default(autoincrement())
+  userId            Int
+  applicationId     Int?
+  recruiterId       Int?
+  type              String       @default("recruiter_outreach") // recruiter_outreach, job_application, referral_request, follow_up
+  recipientEmail    String
+  recipientName     String?
+  companyName       String?
+  jobTitle          String?
+  subject           String
+  body              String
+  status            String       @default("DRAFT") // DRAFT, READY_TO_SEND, SENDING, SENT, FAILED
+  providerMessageId String?
+  failureReason     String?
+  sentAt            DateTime?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @default(now()) @updatedAt
+  user              User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  application       Application? @relation(fields: [applicationId], references: [id], onDelete: SetNull)
+  recruiter         Recruiter?   @relation(fields: [recruiterId], references: [id], onDelete: SetNull)
 }
 
 model Video {

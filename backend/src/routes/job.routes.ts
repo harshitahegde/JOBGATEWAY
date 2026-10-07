@@ -15,29 +15,7 @@ router.get('/', authenticateToken, async (req: AuthenticatedRequest, res: Respon
       orderBy: { createdAt: 'desc' }
     });
 
-    // Seed mock jobs if database is empty
-    if (jobs.length === 0) {
-      const mockJobs = await providers.job.searchJobs("", "");
-      for (const m of mockJobs) {
-        await prisma.job.create({
-          data: {
-            title: m.title,
-            company: m.company,
-            location: m.location,
-            type: m.type,
-            experienceLevel: m.experienceLevel,
-            salaryRange: m.salaryRange,
-            description: m.description,
-            requirements: JSON.stringify(m.requirements),
-            applicationUrl: m.applicationUrl,
-            source: m.source
-          }
-        });
-      }
-      jobs = await prisma.job.findMany({ orderBy: { createdAt: 'desc' } });
-    }
-
-    // Filter jobs in memory
+    // Filter jobs in memory if title/location/skill query params provided
     let filtered = jobs;
     if (title && (title as string).trim()) {
       const tLower = (title as string).toLowerCase().trim();
@@ -60,16 +38,16 @@ router.get('/', authenticateToken, async (req: AuthenticatedRequest, res: Respon
       ...j,
       requirements: j.requirements ? JSON.parse(j.requirements) : [],
       isSaved: savedJobIds.has(j.id),
-      isDemo: providers.job.isDemoMode
+      isDemo: false
     }));
 
     return res.json({
       jobs: result,
       provider: {
-        isDemoMode: providers.job.isDemoMode,
-        message: providers.job.isDemoMode
-          ? "Demo Mode: Showing sample jobs. Connect a job provider API to retrieve live listings."
-          : "Live API Connected"
+        isConfigured: providers.job.isConfigured,
+        message: providers.job.isConfigured
+          ? "Live API Connected"
+          : "Live job search is not connected yet."
       }
     });
   } catch (err: any) {

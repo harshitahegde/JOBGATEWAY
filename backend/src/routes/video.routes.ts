@@ -27,8 +27,23 @@ const upload = multer({
   limits: { fileSize: 50 * 1024 * 1024 } // 50MB limit
 });
 
+const handleVideoUpload = (req: AuthenticatedRequest, res: Response, next: Function) => {
+  upload.single('video')(req, res, (err: any) => {
+    if (err) {
+      if (err instanceof multer.MulterError) {
+        if (err.code === 'LIMIT_FILE_SIZE') {
+          return res.status(400).json({ error: 'Video file exceeds 50MB size limit.' });
+        }
+        return res.status(400).json({ error: `Upload error: ${err.message}` });
+      }
+      return res.status(400).json({ error: err.message || 'Invalid video file.' });
+    }
+    next();
+  });
+};
+
 // POST /api/videos/upload
-router.post('/upload', authenticateToken, upload.single('video'), async (req: AuthenticatedRequest, res: Response) => {
+router.post('/upload', authenticateToken, handleVideoUpload, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const userId = req.user!.userId;
     const title = req.body.title || `Self Intro Video - ${new Date().toLocaleDateString()}`;

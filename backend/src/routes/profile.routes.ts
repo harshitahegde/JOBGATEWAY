@@ -4,6 +4,16 @@ import { authenticateToken, AuthenticatedRequest } from '../middleware/auth';
 
 const router = Router();
 
+function safeJsonParse<T>(val: any, fallback: T): T {
+  if (!val) return fallback;
+  if (typeof val !== 'string') return val;
+  try {
+    return JSON.parse(val);
+  } catch {
+    return fallback;
+  }
+}
+
 // GET /api/profile
 router.get('/', authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -14,9 +24,9 @@ router.get('/', authenticateToken, async (req: AuthenticatedRequest, res: Respon
       profile = await prisma.profile.create({
         data: {
           userId,
-          fullName: 'Developer Candidate',
-          location: 'Remote / Global',
-          bio: 'Enthusiastic software engineer.'
+          fullName: req.user?.email.split('@')[0] || 'User',
+          location: '',
+          bio: ''
         }
       });
     }
@@ -26,11 +36,11 @@ router.get('/', authenticateToken, async (req: AuthenticatedRequest, res: Respon
     return res.json({
       profile: {
         ...profile,
-        careerPreferences: profile.careerPreferences ? JSON.parse(profile.careerPreferences) : {},
-        education: profile.education ? JSON.parse(profile.education) : [],
-        experience: profile.experience ? JSON.parse(profile.experience) : [],
-        projects: profile.projects ? JSON.parse(profile.projects) : [],
-        certifications: profile.certifications ? JSON.parse(profile.certifications) : [],
+        careerPreferences: safeJsonParse(profile.careerPreferences, {}),
+        education: safeJsonParse(profile.education, []),
+        experience: safeJsonParse(profile.experience, []),
+        projects: safeJsonParse(profile.projects, []),
+        certifications: safeJsonParse(profile.certifications, []),
         skills
       }
     });
@@ -51,13 +61,13 @@ router.put('/', authenticateToken, async (req: AuthenticatedRequest, res: Respon
     const updatedProfile = await prisma.profile.upsert({
       where: { userId },
       update: {
-        fullName,
-        phone,
-        location,
-        bio,
-        linkedinUrl,
-        githubUrl,
-        portfolioUrl,
+        fullName: typeof fullName === 'string' ? fullName.trim() : undefined,
+        phone: typeof phone === 'string' ? phone.trim() : undefined,
+        location: typeof location === 'string' ? location.trim() : undefined,
+        bio: typeof bio === 'string' ? bio.trim() : undefined,
+        linkedinUrl: typeof linkedinUrl === 'string' ? linkedinUrl.trim() : undefined,
+        githubUrl: typeof githubUrl === 'string' ? githubUrl.trim() : undefined,
+        portfolioUrl: typeof portfolioUrl === 'string' ? portfolioUrl.trim() : undefined,
         careerPreferences: careerPreferences ? JSON.stringify(careerPreferences) : undefined,
         education: education ? JSON.stringify(education) : undefined,
         experience: experience ? JSON.stringify(experience) : undefined,
@@ -66,13 +76,13 @@ router.put('/', authenticateToken, async (req: AuthenticatedRequest, res: Respon
       },
       create: {
         userId,
-        fullName: fullName || 'User',
-        phone,
-        location,
-        bio,
-        linkedinUrl,
-        githubUrl,
-        portfolioUrl,
+        fullName: typeof fullName === 'string' && fullName.trim() ? fullName.trim() : (req.user?.email.split('@')[0] || 'User'),
+        phone: typeof phone === 'string' ? phone.trim() : undefined,
+        location: typeof location === 'string' ? location.trim() : '',
+        bio: typeof bio === 'string' ? bio.trim() : '',
+        linkedinUrl: typeof linkedinUrl === 'string' ? linkedinUrl.trim() : undefined,
+        githubUrl: typeof githubUrl === 'string' ? githubUrl.trim() : undefined,
+        portfolioUrl: typeof portfolioUrl === 'string' ? portfolioUrl.trim() : undefined,
         careerPreferences: careerPreferences ? JSON.stringify(careerPreferences) : undefined,
         education: education ? JSON.stringify(education) : undefined,
         experience: experience ? JSON.stringify(experience) : undefined,
@@ -81,17 +91,23 @@ router.put('/', authenticateToken, async (req: AuthenticatedRequest, res: Respon
       }
     });
 
-    // Update Skills
+    // Update Skills (with deduplication)
     if (Array.isArray(skills)) {
       await prisma.userSkill.deleteMany({ where: { userId } });
+      const seenSkills = new Set<string>();
       for (const sk of skills) {
-        if (sk.skillName) {
+        const rawName = sk && typeof sk.skillName === 'string' ? sk.skillName.trim() : '';
+        const nameLower = rawName.toLowerCase();
+        if (rawName && !seenSkills.has(nameLower)) {
+          seenSkills.add(nameLower);
           await prisma.userSkill.create({
             data: {
               userId,
-              skillName: sk.skillName,
+              skillName: rawName,
               proficiencyLevel: sk.proficiencyLevel || 'Intermediate',
-              yearsExperience: sk.yearsExperience || 1
+              yearsExperience: typeof sk.yearsExperience === 'number' && !isNaN(sk.yearsExperience)
+                ? Math.max(0, sk.yearsExperience)
+                : 1
             }
           });
         }

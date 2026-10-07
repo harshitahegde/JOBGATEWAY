@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.providers = exports.RealOrMockAIProvider = exports.MockEmailSenderProvider = exports.MockEmailFinderProvider = exports.MockJobProvider = void 0;
+exports.providers = exports.RealOrMockAIProvider = exports.UnconfiguredEmailFinderProvider = exports.UnconfiguredJobProvider = void 0;
 const form_data_1 = __importDefault(require("form-data"));
 const axios_1 = __importDefault(require("axios"));
 const fs_1 = __importDefault(require("fs"));
@@ -11,90 +11,31 @@ const path_1 = __importDefault(require("path"));
 const USE_MOCK_SERVICES = process.env.USE_MOCK_SERVICES !== 'false';
 const AI_SERVICE_URL = process.env.AI_SERVICE_URL || 'http://localhost:8000';
 const SMTP_HOST = process.env.SMTP_HOST;
-class MockJobProvider {
+class UnconfiguredJobProvider {
     constructor() {
-        this.isDemoMode = true;
+        this.isConfigured = false;
     }
     async searchJobs(query, location) {
-        return [
-            {
-                id: 1,
-                title: "Full Stack Developer (Node.js & React)",
-                company: "TechCorp Solutions",
-                location: location || "San Francisco, CA (Remote)",
-                type: "Full-Time",
-                experienceLevel: "Mid-Level",
-                salaryRange: "$110,000 - $135,000",
-                description: "Looking for a passionate Full Stack Developer to build modern web applications using React, Node.js, TypeScript, and MySQL.",
-                requirements: ["React", "Node.js", "TypeScript", "MySQL", "REST API", "Git"],
-                applicationUrl: "https://careers.techcorp.com/jobs/full-stack-dev",
-                source: "Demo Mode Sample Listing",
-                isDemo: true
-            },
-            {
-                id: 2,
-                title: "Frontend Engineer (React / Next.js)",
-                company: "Innovate AI",
-                location: location || "New York, NY (Hybrid)",
-                type: "Full-Time",
-                experienceLevel: "Entry-Level",
-                salaryRange: "$85,000 - $105,000",
-                description: "Join our dynamic frontend team building modern AI-driven user interfaces with Next.js, Tailwind CSS, and REST APIs.",
-                requirements: ["JavaScript", "TypeScript", "React", "Next.js", "Tailwind CSS"],
-                applicationUrl: "https://innovate.ai/careers/frontend-eng",
-                source: "Demo Mode Sample Listing",
-                isDemo: true
-            },
-            {
-                id: 3,
-                title: "Backend Software Engineer (Node.js & Python)",
-                company: "DataPulse Inc.",
-                location: location || "Austin, TX (Remote)",
-                type: "Full-Time",
-                experienceLevel: "Senior",
-                salaryRange: "$140,000 - $170,000",
-                description: "Architect scalable microservices, manage databases, and build AI service integrations with Python and FastAPI.",
-                requirements: ["Node.js", "Python", "FastAPI", "Express.js", "MySQL", "Docker"],
-                applicationUrl: "https://datapulse.io/jobs/backend-engineer",
-                source: "Demo Mode Sample Listing",
-                isDemo: true
-            }
-        ];
+        // Honest unconfigured state: Live Job Search API is not connected yet
+        return [];
     }
 }
-exports.MockJobProvider = MockJobProvider;
-class MockEmailFinderProvider {
+exports.UnconfiguredJobProvider = UnconfiguredJobProvider;
+class UnconfiguredEmailFinderProvider {
     constructor() {
-        this.isDemoMode = true;
+        this.isConfigured = false;
     }
     async findRecruiter(companyName) {
-        return {
-            companyName,
-            name: "Sarah Jenkins",
-            title: "Senior Technical Recruiter",
-            email: `recruiter@${companyName.toLowerCase().replace(/[^a-z0-9]/g, '')}.com`,
-            linkedinUrl: "https://linkedin.com/in/recruiter-demo",
-            verified: false,
-            isDemo: true
-        };
+        return null;
     }
 }
-exports.MockEmailFinderProvider = MockEmailFinderProvider;
-class MockEmailSenderProvider {
-    constructor() {
-        this.isMockMode = true;
-    }
-    async sendEmail(to, subject, body) {
-        console.log(`[MOCK EMAIL SENDER] Demo outreach recorded for: ${to} | Subject: ${subject}`);
-        return {
-            success: true,
-            isMock: true,
-            messageId: `demo_record_${Date.now()}`,
-            statusMessage: "Demo email created successfully. No email was actually sent."
-        };
-    }
-}
-exports.MockEmailSenderProvider = MockEmailSenderProvider;
+exports.UnconfiguredEmailFinderProvider = UnconfiguredEmailFinderProvider;
+// 3. Email Provider Abstraction (Real SMTP or Honest Draft Mode)
+const email_provider_1 = require("./email_provider");
+// 4. AI Provider (FastAPI Bridge)
+const ats_engine_1 = require("../ats_engine");
+const resume_analyzer_ts_1 = require("../resume_analyzer_ts");
+const outreach_generator_1 = require("../outreach_generator");
 class RealOrMockAIProvider {
     async parseResume(filePath) {
         try {
@@ -125,31 +66,32 @@ class RealOrMockAIProvider {
             };
         }
     }
-    async calculateATSScore(resumeText, jobDescription) {
+    async calculateATSScore(resumeText, jobDescription, parsedResume) {
         try {
             const response = await axios_1.default.post(`${AI_SERVICE_URL}/ats-score`, {
                 resume_text: resumeText,
-                job_description: jobDescription
+                job_description: jobDescription,
+                parsed_resume: parsedResume
             }, { timeout: 5000 });
             return response.data;
         }
         catch (err) {
-            console.warn('[AI PROVIDER] FastAPI offline. Local ATS computation fallback.');
-            const resumeLower = (resumeText || "").toLowerCase();
-            const jobLower = (jobDescription || "").toLowerCase();
-            const skills = ["JavaScript", "TypeScript", "React", "Node.js", "Express", "Python", "SQL", "MySQL", "Docker", "AWS", "Git", "REST API", "Tailwind CSS"];
-            const matched = skills.filter(s => resumeLower.includes(s.toLowerCase()) && jobLower.includes(s.toLowerCase()));
-            const missing = skills.filter(s => !resumeLower.includes(s.toLowerCase()) && jobLower.includes(s.toLowerCase()));
-            const score = Math.round((matched.length / Math.max(1, matched.length + missing.length)) * 100);
-            return {
-                ats_score: score,
-                matched_keywords: matched,
-                missing_keywords: missing,
-                suggestions: [
-                    "Only add missing skills if you possess hands-on project experience with them.",
-                    "Ensure your professional summary highlights your primary tech stack clearly."
-                ]
-            };
+            console.warn('[AI PROVIDER] FastAPI offline or error. Using deterministic TS calculation fallback.');
+            return (0, ats_engine_1.calculateDeterministicATSScore)(resumeText, jobDescription, parsedResume);
+        }
+    }
+    async analyzeResume(resumeData, rawText, targetJobDescription) {
+        try {
+            const response = await axios_1.default.post(`${AI_SERVICE_URL}/analyze-resume`, {
+                resume_data: resumeData,
+                raw_text: rawText || "",
+                target_job_description: targetJobDescription || ""
+            }, { timeout: 5000 });
+            return response.data;
+        }
+        catch (err) {
+            console.warn('[AI PROVIDER] FastAPI /analyze-resume offline or error. Using TS calculation fallback.');
+            return (0, resume_analyzer_ts_1.analyzeResumeContentTS)(resumeData, rawText, targetJobDescription);
         }
     }
     async optimizeResume(resumeData, targetJobDescription, targetJobTitle) {
@@ -163,53 +105,67 @@ class RealOrMockAIProvider {
         }
         catch (err) {
             console.warn('[AI PROVIDER] FastAPI offline. Local JS optimization fallback.');
-            return {
-                original_content: resumeData,
-                optimized_content: {
-                    ...resumeData,
-                    target_job_title: targetJobTitle,
-                    summary: `Targeted ${targetJobTitle} professional. ${resumeData.summary || ''}`
-                },
-                matched_skills: resumeData.skills || [],
-                missing_keywords: [],
-                optimization_notes: [
-                    "Optimized summary for keyword alignment.",
-                    "Preserved actual candidate facts."
-                ]
-            };
+            return (0, resume_analyzer_ts_1.optimizeResumeContentTS)(resumeData, targetJobDescription, targetJobTitle);
         }
     }
-    async generateEmail(candidateName, candidateTitle, topSkills, recruiterName, companyName, jobTitle, videoUrl) {
+    async generateEmail(input) {
         try {
+            const verifiedEducation = input.resumeFacts?.education && input.resumeFacts.education.length > 0
+                ? (input.resumeFacts.education[0].degree || input.resumeFacts.education[0].institution || "")
+                : "";
+            const verifiedExperience = input.resumeFacts?.experience && input.resumeFacts.experience.length > 0
+                ? (input.resumeFacts.experience[0].title || "")
+                : "";
+            const verifiedProject = input.resumeFacts?.projects && input.resumeFacts.projects.length > 0
+                ? (input.resumeFacts.projects[0].name || "")
+                : "";
             const response = await axios_1.default.post(`${AI_SERVICE_URL}/generate-email`, {
-                candidate_name: candidateName,
-                candidate_title: candidateTitle,
-                top_skills: topSkills,
-                recruiter_name: recruiterName,
-                company_name: companyName,
-                job_title: jobTitle,
-                video_intro_url: videoUrl
+                candidate_name: input.candidateName,
+                top_skills: input.resumeFacts?.skills || [],
+                recruiter_name: input.recruiterName || "",
+                recruiter_email: input.recruiterEmail || "",
+                company_name: input.companyName || "",
+                job_title: input.jobTitle || "",
+                outreach_type: input.type || "recruiter_outreach",
+                tone: input.tone || "professional",
+                job_description: input.jobDescription || "",
+                video_intro_url: input.videoIntroUrl || "",
+                primary_education: verifiedEducation,
+                primary_experience: verifiedExperience,
+                primary_project: verifiedProject
             }, { timeout: 5000 });
-            return response.data;
+            const res = response.data;
+            return {
+                type: res.type || input.type || 'recruiter_outreach',
+                tone: res.tone || input.tone || 'professional',
+                recipientName: res.recipient_name || input.recruiterName || '',
+                recipientEmail: res.recipient_email || input.recruiterEmail || '',
+                companyName: res.company_name || input.companyName || '',
+                jobTitle: res.job_title || input.jobTitle || '',
+                subject: res.subject,
+                body: res.body,
+                groundedSkills: res.grounded_skills || [],
+                status: 'DRAFT',
+                hasVideoIntro: Boolean(res.has_video_intro),
+                factsTraceable: {
+                    skillsUsed: res.grounded_skills || [],
+                    educationUsed: verifiedEducation ? [verifiedEducation] : [],
+                    experienceUsed: verifiedExperience ? [verifiedExperience] : [],
+                    projectsUsed: verifiedProject ? [verifiedProject] : []
+                }
+            };
         }
         catch (err) {
-            return {
-                recipient_name: recruiterName || "Hiring Manager",
-                company_name: companyName,
-                job_title: jobTitle,
-                subject: `Application / Expression of Interest: ${jobTitle} - ${candidateName}`,
-                body: `Dear ${recruiterName || 'Hiring Manager'},\n\nI hope this email finds you well. I am writing to express my interest in the ${jobTitle} position at ${companyName}.\n\nAs a ${candidateTitle || 'Software Professional'} with experience in ${topSkills.join(', ') || 'software development'}, I am sharing my resume for your review.${videoUrl ? `\n\nYou can also watch my short video self-introduction here: ${videoUrl}` : ''}\n\nBest regards,\n${candidateName}`,
-                attachments: ["resume.pdf"],
-                has_video_link: Boolean(videoUrl)
-            };
+            // Deterministic TypeScript fact-grounded generator fallback
+            return (0, outreach_generator_1.generateFactGroundedOutreach)(input);
         }
     }
 }
 exports.RealOrMockAIProvider = RealOrMockAIProvider;
 // 5. Provider Export Registry
 exports.providers = {
-    job: new MockJobProvider(),
-    emailFinder: new MockEmailFinderProvider(),
-    emailSender: new MockEmailSenderProvider(),
+    job: new UnconfiguredJobProvider(),
+    emailFinder: new UnconfiguredEmailFinderProvider(),
+    emailSender: (0, email_provider_1.createEmailProvider)(),
     ai: new RealOrMockAIProvider()
 };

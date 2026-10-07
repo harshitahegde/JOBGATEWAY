@@ -4,6 +4,18 @@ const express_1 = require("express");
 const db_1 = require("../db");
 const auth_1 = require("../middleware/auth");
 const router = (0, express_1.Router)();
+function safeJsonParse(val, fallback) {
+    if (!val)
+        return fallback;
+    if (typeof val !== 'string')
+        return val;
+    try {
+        return JSON.parse(val);
+    }
+    catch {
+        return fallback;
+    }
+}
 // GET /api/profile
 router.get('/', auth_1.authenticateToken, async (req, res) => {
     try {
@@ -13,9 +25,9 @@ router.get('/', auth_1.authenticateToken, async (req, res) => {
             profile = await db_1.prisma.profile.create({
                 data: {
                     userId,
-                    fullName: 'Developer Candidate',
-                    location: 'Remote / Global',
-                    bio: 'Enthusiastic software engineer.'
+                    fullName: req.user?.email.split('@')[0] || 'User',
+                    location: '',
+                    bio: ''
                 }
             });
         }
@@ -23,11 +35,11 @@ router.get('/', auth_1.authenticateToken, async (req, res) => {
         return res.json({
             profile: {
                 ...profile,
-                careerPreferences: profile.careerPreferences ? JSON.parse(profile.careerPreferences) : {},
-                education: profile.education ? JSON.parse(profile.education) : [],
-                experience: profile.experience ? JSON.parse(profile.experience) : [],
-                projects: profile.projects ? JSON.parse(profile.projects) : [],
-                certifications: profile.certifications ? JSON.parse(profile.certifications) : [],
+                careerPreferences: safeJsonParse(profile.careerPreferences, {}),
+                education: safeJsonParse(profile.education, []),
+                experience: safeJsonParse(profile.experience, []),
+                projects: safeJsonParse(profile.projects, []),
+                certifications: safeJsonParse(profile.certifications, []),
                 skills
             }
         });
@@ -44,13 +56,13 @@ router.put('/', auth_1.authenticateToken, async (req, res) => {
         const updatedProfile = await db_1.prisma.profile.upsert({
             where: { userId },
             update: {
-                fullName,
-                phone,
-                location,
-                bio,
-                linkedinUrl,
-                githubUrl,
-                portfolioUrl,
+                fullName: typeof fullName === 'string' ? fullName.trim() : undefined,
+                phone: typeof phone === 'string' ? phone.trim() : undefined,
+                location: typeof location === 'string' ? location.trim() : undefined,
+                bio: typeof bio === 'string' ? bio.trim() : undefined,
+                linkedinUrl: typeof linkedinUrl === 'string' ? linkedinUrl.trim() : undefined,
+                githubUrl: typeof githubUrl === 'string' ? githubUrl.trim() : undefined,
+                portfolioUrl: typeof portfolioUrl === 'string' ? portfolioUrl.trim() : undefined,
                 careerPreferences: careerPreferences ? JSON.stringify(careerPreferences) : undefined,
                 education: education ? JSON.stringify(education) : undefined,
                 experience: experience ? JSON.stringify(experience) : undefined,
@@ -59,13 +71,13 @@ router.put('/', auth_1.authenticateToken, async (req, res) => {
             },
             create: {
                 userId,
-                fullName: fullName || 'User',
-                phone,
-                location,
-                bio,
-                linkedinUrl,
-                githubUrl,
-                portfolioUrl,
+                fullName: typeof fullName === 'string' && fullName.trim() ? fullName.trim() : (req.user?.email.split('@')[0] || 'User'),
+                phone: typeof phone === 'string' ? phone.trim() : undefined,
+                location: typeof location === 'string' ? location.trim() : '',
+                bio: typeof bio === 'string' ? bio.trim() : '',
+                linkedinUrl: typeof linkedinUrl === 'string' ? linkedinUrl.trim() : undefined,
+                githubUrl: typeof githubUrl === 'string' ? githubUrl.trim() : undefined,
+                portfolioUrl: typeof portfolioUrl === 'string' ? portfolioUrl.trim() : undefined,
                 careerPreferences: careerPreferences ? JSON.stringify(careerPreferences) : undefined,
                 education: education ? JSON.stringify(education) : undefined,
                 experience: experience ? JSON.stringify(experience) : undefined,
@@ -73,17 +85,23 @@ router.put('/', auth_1.authenticateToken, async (req, res) => {
                 certifications: certifications ? JSON.stringify(certifications) : undefined
             }
         });
-        // Update Skills
+        // Update Skills (with deduplication)
         if (Array.isArray(skills)) {
             await db_1.prisma.userSkill.deleteMany({ where: { userId } });
+            const seenSkills = new Set();
             for (const sk of skills) {
-                if (sk.skillName) {
+                const rawName = sk && typeof sk.skillName === 'string' ? sk.skillName.trim() : '';
+                const nameLower = rawName.toLowerCase();
+                if (rawName && !seenSkills.has(nameLower)) {
+                    seenSkills.add(nameLower);
                     await db_1.prisma.userSkill.create({
                         data: {
                             userId,
-                            skillName: sk.skillName,
+                            skillName: rawName,
                             proficiencyLevel: sk.proficiencyLevel || 'Intermediate',
-                            yearsExperience: sk.yearsExperience || 1
+                            yearsExperience: typeof sk.yearsExperience === 'number' && !isNaN(sk.yearsExperience)
+                                ? Math.max(0, sk.yearsExperience)
+                                : 1
                         }
                     });
                 }

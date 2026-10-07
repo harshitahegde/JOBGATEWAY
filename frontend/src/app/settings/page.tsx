@@ -12,28 +12,28 @@ export default function SettingsPage() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* Mock Providers Card */}
+        {/* Provider Architecture Card */}
         <div className="bg-white rounded-xl border border-slate-200/80 p-6 shadow-sm space-y-4">
           <h2 className="font-bold text-lg text-slate-900 flex items-center space-x-2 border-b border-slate-100 pb-2">
             <Shield className="w-5 h-5 text-indigo-600" />
-            <span>Mock Providers & Credentials</span>
+            <span>Service Providers & Status</span>
           </h2>
           <div className="space-y-3 text-xs text-slate-600">
             <div className="flex items-center justify-between p-2.5 bg-slate-50 rounded-lg">
-              <span>USE_MOCK_SERVICES</span>
-              <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 font-bold rounded">TRUE (Local Mode)</span>
-            </div>
-            <div className="flex items-center justify-between p-2.5 bg-slate-50 rounded-lg">
               <span>Job Search Provider</span>
-              <span className="font-semibold text-slate-900">MockJobProvider</span>
-            </div>
-            <div className="flex items-center justify-between p-2.5 bg-slate-50 rounded-lg">
-              <span>Email Finder Provider</span>
-              <span className="font-semibold text-slate-900">MockEmailFinderProvider</span>
+              <span className="px-2 py-0.5 bg-slate-200 text-slate-700 font-bold rounded">Unconnected (Pending Live API)</span>
             </div>
             <div className="flex items-center justify-between p-2.5 bg-slate-50 rounded-lg">
               <span>Email Sender Provider</span>
-              <span className="font-semibold text-slate-900">MockEmailSenderProvider</span>
+              <span className="px-2 py-0.5 bg-purple-100 text-purple-800 font-bold rounded">Draft-Only / SMTP Safe</span>
+            </div>
+            <div className="flex items-center justify-between p-2.5 bg-slate-50 rounded-lg">
+              <span>ATS & Resume Engine</span>
+              <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 font-bold rounded">FastAPI & TS Parity Active</span>
+            </div>
+            <div className="flex items-center justify-between p-2.5 bg-slate-50 rounded-lg">
+              <span>Data Ownership Guard</span>
+              <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 font-bold rounded">Enforced (req.user.userId)</span>
             </div>
           </div>
         </div>

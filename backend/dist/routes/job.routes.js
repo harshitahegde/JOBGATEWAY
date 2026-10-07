@@ -13,28 +13,7 @@ router.get('/', auth_1.authenticateToken, async (req, res) => {
         let jobs = await db_1.prisma.job.findMany({
             orderBy: { createdAt: 'desc' }
         });
-        // Seed mock jobs if database is empty
-        if (jobs.length === 0) {
-            const mockJobs = await providers_1.providers.job.searchJobs("", "");
-            for (const m of mockJobs) {
-                await db_1.prisma.job.create({
-                    data: {
-                        title: m.title,
-                        company: m.company,
-                        location: m.location,
-                        type: m.type,
-                        experienceLevel: m.experienceLevel,
-                        salaryRange: m.salaryRange,
-                        description: m.description,
-                        requirements: JSON.stringify(m.requirements),
-                        applicationUrl: m.applicationUrl,
-                        source: m.source
-                    }
-                });
-            }
-            jobs = await db_1.prisma.job.findMany({ orderBy: { createdAt: 'desc' } });
-        }
-        // Filter jobs in memory
+        // Filter jobs in memory if title/location/skill query params provided
         let filtered = jobs;
         if (title && title.trim()) {
             const tLower = title.toLowerCase().trim();
@@ -55,15 +34,15 @@ router.get('/', auth_1.authenticateToken, async (req, res) => {
             ...j,
             requirements: j.requirements ? JSON.parse(j.requirements) : [],
             isSaved: savedJobIds.has(j.id),
-            isDemo: providers_1.providers.job.isDemoMode
+            isDemo: false
         }));
         return res.json({
             jobs: result,
             provider: {
-                isDemoMode: providers_1.providers.job.isDemoMode,
-                message: providers_1.providers.job.isDemoMode
-                    ? "Demo Mode: Showing sample jobs. Connect a job provider API to retrieve live listings."
-                    : "Live API Connected"
+                isConfigured: providers_1.providers.job.isConfigured,
+                message: providers_1.providers.job.isConfigured
+                    ? "Live API Connected"
+                    : "Live job search is not connected yet."
             }
         });
     }

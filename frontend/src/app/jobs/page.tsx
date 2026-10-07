@@ -62,18 +62,22 @@ export default function JobsPage() {
   };
 
   return (
-    <div className="max-w-6xl mx-auto space-y-8">
+    <div className="max-w-6xl mx-auto space-y-8 pb-16">
       <div>
+        <div className="inline-flex items-center space-x-2 px-3 py-1 rounded-full bg-blue-50 border border-blue-200 text-blue-700 text-xs font-semibold mb-2">
+          <Briefcase className="w-3.5 h-3.5 text-blue-600" />
+          <span>Job Discovery Engine</span>
+        </div>
         <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Job Discovery Engine</h1>
-        <p className="text-sm text-slate-500 mt-1">Search active positions, save postings, and track applications</p>
+        <p className="text-sm text-slate-600 mt-1">Search active positions, save postings, and track applications</p>
       </div>
 
-      {/* Demo Mode Banner */}
-      {providerInfo?.isDemoMode && (
-        <div className="p-4 bg-amber-50 border border-amber-200 text-amber-900 rounded-xl flex items-start space-x-3 text-sm">
-          <Info className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
+      {/* Provider Status Banner */}
+      {!providerInfo?.isConfigured && (
+        <div className="p-4 sm:p-5 bg-slate-100 border border-slate-200 text-slate-800 rounded-xl flex items-start space-x-3 text-sm">
+          <Info className="w-5 h-5 text-indigo-600 flex-shrink-0 mt-0.5" />
           <div>
-            <strong className="font-bold">Demo Mode Notice:</strong> {providerInfo.message}
+            <strong className="font-bold">Job Search Notice:</strong> Live job search is not connected yet. Connect an external Job Search API to retrieve active job postings.
           </div>
         </div>
       )}
@@ -87,7 +91,7 @@ export default function JobsPage() {
       )}
 
       {/* Search Bar Form */}
-      <form onSubmit={handleSearchSubmit} className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-sm flex flex-col md:flex-row gap-3">
+      <form onSubmit={handleSearchSubmit} className="bg-white p-4 sm:p-5 rounded-xl border border-slate-200/80 shadow-sm flex flex-col md:flex-row gap-3">
         <div className="flex-1 relative">
           <Search className="w-5 h-5 absolute left-3.5 top-3 text-slate-400" />
           <input
@@ -124,8 +128,10 @@ export default function JobsPage() {
       ) : jobs.length === 0 ? (
         <div className="bg-white rounded-xl border border-slate-200 p-12 text-center space-y-3">
           <Briefcase className="w-12 h-12 text-slate-300 mx-auto" />
-          <h3 className="text-lg font-bold text-slate-800">No jobs found</h3>
-          <p className="text-sm text-slate-500">Try broadening your title or location filter parameters.</p>
+          <h3 className="text-lg font-bold text-slate-800">Live job search is not connected yet</h3>
+          <p className="text-sm text-slate-500 max-w-md mx-auto">
+            Live job discovery requires an external API integration. Track your existing applications and match your resume in the ATS Analyzer in the meantime.
+          </p>
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">

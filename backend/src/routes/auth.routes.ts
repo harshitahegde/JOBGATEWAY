@@ -26,8 +26,8 @@ router.post('/register', async (req, res) => {
         profile: {
           create: {
             fullName,
-            bio: 'Software Engineering professional passionate about building clean, scalable applications.',
-            location: 'Remote / Open to Relocation'
+            bio: '',
+            location: ''
           }
         }
       },

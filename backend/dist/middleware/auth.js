@@ -14,7 +14,10 @@ const authenticateToken = (req, res, next) => {
     }
     try {
         const decoded = jsonwebtoken_1.default.verify(token, JWT_SECRET);
-        req.user = decoded;
+        if (!decoded || typeof decoded.userId !== 'number' || !decoded.email) {
+            return res.status(403).json({ error: 'Malformed authentication token payload' });
+        }
+        req.user = { userId: decoded.userId, email: decoded.email };
         next();
     }
     catch (err) {
