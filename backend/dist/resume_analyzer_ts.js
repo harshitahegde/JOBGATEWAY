@@ -1,124 +1,69 @@
 "use strict";
-// 3-Layer Fact-Grounded Resume Analysis Engine for Node.js / TypeScript
-// 100% logic and output parity with Python FastAPI resume_analyzer.py
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.analyzeResumeContentTS = analyzeResumeContentTS;
+exports.verbIngToEdTS = verbIngToEdTS;
 exports.rewriteBulletFactGroundedTS = rewriteBulletFactGroundedTS;
+exports.calculateResumeQualityScoreTS = calculateResumeQualityScoreTS;
+exports.generateConcreteImprovementsTS = generateConcreteImprovementsTS;
+exports.analyzeResumeContentTS = analyzeResumeContentTS;
 exports.optimizeResumeContentTS = optimizeResumeContentTS;
+const ats_engine_1 = require("./ats_engine");
+const ACTION_VERBS = new Set([
+    "architected", "built", "created", "designed", "developed", "engineered",
+    "implemented", "launched", "managed", "optimized", "spearheaded", "automated",
+    "scaled", "constructed", "integrated", "refactored", "deployed", "orchestrated",
+    "formulated", "established", "directed", "transformed", "streamlined", "led",
+    "delivered", "programmed", "authored", "resolved", "accelerated", "reduced"
+]);
 const WEAK_PASSIVE_PHRASES = [
     "responsible for", "worked on", "helped with", "assisted in", "duties included",
-    "tasked with", "involved in", "handled", "participated in"
+    "tasked with", "involved in", "handled", "participated in", "helped to"
 ];
 function verbIngToEdTS(ingVerb) {
     const w = ingVerb.toLowerCase();
-    if (w === "building")
-        return "Built";
-    if (w === "creating")
-        return "Created";
-    if (w === "designing")
-        return "Designed";
-    if (w === "developing")
-        return "Developed";
-    if (w === "engineering")
-        return "Engineered";
-    if (w === "implementing")
-        return "Implemented";
-    if (w === "managing")
-        return "Managed";
-    if (w === "optimizing")
-        return "Optimized";
-    if (w === "writing")
-        return "Wrote";
-    if (w === "testing")
-        return "Tested";
-    if (w === "deploying")
-        return "Deployed";
-    if (w === "maintaining")
-        return "Maintained";
-    if (w === "configuring")
-        return "Configured";
-    if (w === "automating")
-        return "Automated";
-    if (w === "scaling")
-        return "Scaled";
+    const mapping = {
+        building: "Built", creating: "Created", designing: "Designed",
+        developing: "Developed", engineering: "Engineered", implementing: "Implemented",
+        managing: "Managed", optimizing: "Optimized", writing: "Wrote",
+        testing: "Tested", deploying: "Deployed", maintaining: "Maintained",
+        configuring: "Configured", automating: "Automated", scaling: "Scaled",
+        leading: "Led", delivering: "Delivered", refactoring: "Refactored",
+        integrating: "Integrated", architecting: "Architected", orchestrating: "Orchestrated"
+    };
+    if (mapping[w])
+        return mapping[w];
     if (w.endsWith("ing")) {
-        return w.slice(0, -3) + "ed";
+        return (w.slice(0, -3) + "ed").charAt(0).toUpperCase() + (w.slice(0, -3) + "ed").slice(1);
     }
     return ingVerb.charAt(0).toUpperCase() + ingVerb.slice(1);
 }
 function rewriteBulletFactGroundedTS(bullet) {
-    const cleanBullet = bullet.trim();
-    if (!cleanBullet) {
-        return { fgRewrite: "", metricNote: "Insufficient information" };
+    const clean = bullet.trim().replace(/^[-*• \t]+/, '');
+    if (!clean) {
+        return { fgRewrite: "", metricNote: "Insufficient text" };
     }
-    const hasMetric = /\b(\d+%|\d+\+|\$\d+|\d+\s*users|\d+\s*ms|\d+\s*k|\d+\s*GB|\d+\s*TB|\d+\s*x)\b/i.test(cleanBullet);
-    const metricNote = hasMetric ? "Contains verified numbers" : "Add a verified metric if available.";
-    let rewritten = cleanBullet;
+    const hasMetric = /\b(?:\d+%\+?|\$\d+(?:\.\d+)?[kmb]?|\d+\+?\s*(?:users|requests|qps|ms|k|mb|gb|tb|x|million|billion|teams?|engineers?))\b/i.test(clean);
+    const metricNote = hasMetric ? "Contains verified numbers" : "Consider adding a verifiable metric if you have real numbers from this role.";
+    let rewritten = clean;
     const patterns = [
-        {
-            regex: /^(?:was\s+)?responsible\s+for\s+(?:the\s+)?([a-z]+ing)\b/i,
-            replacer: (_, g1) => verbIngToEdTS(g1 || '')
-        },
-        {
-            regex: /^(?:was\s+)?responsible\s+for\s+/i,
-            replacer: () => ''
-        },
-        {
-            regex: /^worked\s+on\s+(?:the\s+)?([a-z]+ing)\b/i,
-            replacer: (_, g1) => verbIngToEdTS(g1 || '')
-        },
-        {
-            regex: /^worked\s+on\s+/i,
-            replacer: () => 'Developed '
-        },
-        {
-            regex: /^helped\s+with\s+(?:the\s+)?([a-z]+ing)\b/i,
-            replacer: (_, g1) => 'Contributed to ' + g1
-        },
-        {
-            regex: /^helped\s+with\s+/i,
-            replacer: () => 'Contributed to '
-        },
-        {
-            regex: /^assisted\s+in\s+(?:the\s+)?([a-z]+ing)\b/i,
-            replacer: (_, g1) => 'Assisted with ' + g1
-        },
-        {
-            regex: /^assisted\s+in\s+/i,
-            replacer: () => 'Assisted with '
-        },
-        {
-            regex: /^duties\s+included\s+(?:the\s+)?([a-z]+ing)\b/i,
-            replacer: (_, g1) => verbIngToEdTS(g1 || '')
-        },
-        {
-            regex: /^duties\s+included\s+/i,
-            replacer: () => ''
-        },
-        {
-            regex: /^tasked\s+with\s+(?:the\s+)?([a-z]+ing)\b/i,
-            replacer: (_, g1) => verbIngToEdTS(g1 || '')
-        },
-        {
-            regex: /^tasked\s+with\s+/i,
-            replacer: () => ''
-        },
-        {
-            regex: /^involved\s+in\s+(?:the\s+)?([a-z]+ing)\b/i,
-            replacer: (_, g1) => 'Participated in ' + g1
-        },
-        {
-            regex: /^involved\s+in\s+/i,
-            replacer: () => 'Participated in '
-        },
-        {
-            regex: /^handled\s+(?:the\s+)?([a-z]+ing)\b/i,
-            replacer: (_, g1) => verbIngToEdTS(g1 || '')
-        },
-        {
-            regex: /^handled\s+/i,
-            replacer: () => 'Managed '
-        }
+        { regex: /^(?:i\s+)?(?:was\s+)?responsible\s+for\s+(?:the\s+)?([a-z]+ing)\b/i, replacer: (_, g1) => verbIngToEdTS(g1 || '') + " " },
+        { regex: /^(?:i\s+)?(?:was\s+)?responsible\s+for\s+(?:the\s+)?development\s+of\b/i, replacer: () => 'Developed ' },
+        { regex: /^(?:i\s+)?(?:was\s+)?responsible\s+for\s+(?:the\s+)?design\s+of\b/i, replacer: () => 'Designed ' },
+        { regex: /^(?:i\s+)?(?:was\s+)?responsible\s+for\s+(?:the\s+)?management\s+of\b/i, replacer: () => 'Managed ' },
+        { regex: /^(?:i\s+)?(?:was\s+)?responsible\s+for\s+/i, replacer: () => 'Led and developed ' },
+        { regex: /^(?:i\s+)?worked\s+on\s+(?:the\s+)?([a-z]+ing)\b/i, replacer: (_, g1) => verbIngToEdTS(g1 || '') + " " },
+        { regex: /^(?:i\s+)?worked\s+on\s+/i, replacer: () => 'Developed ' },
+        { regex: /^(?:i\s+)?helped\s+with\s+(?:the\s+)?([a-z]+ing)\b/i, replacer: (_, g1) => 'Contributed to ' + g1 + " " },
+        { regex: /^(?:i\s+)?helped\s+with\s+/i, replacer: () => 'Contributed to ' },
+        { regex: /^(?:i\s+)?assisted\s+in\s+(?:the\s+)?([a-z]+ing)\b/i, replacer: (_, g1) => 'Assisted in ' + g1 + " " },
+        { regex: /^(?:i\s+)?assisted\s+in\s+/i, replacer: () => 'Assisted with ' },
+        { regex: /^(?:my\s+)?duties\s+included\s+(?:the\s+)?([a-z]+ing)\b/i, replacer: (_, g1) => verbIngToEdTS(g1 || '') + " " },
+        { regex: /^(?:my\s+)?duties\s+included\s+/i, replacer: () => 'Managed and executed ' },
+        { regex: /^(?:i\s+)?(?:was\s+)?tasked\s+with\s+(?:the\s+)?([a-z]+ing)\b/i, replacer: (_, g1) => verbIngToEdTS(g1 || '') + " " },
+        { regex: /^(?:i\s+)?(?:was\s+)?tasked\s+with\s+/i, replacer: () => 'Executed ' },
+        { regex: /^(?:i\s+)?(?:was\s+)?involved\s+in\s+(?:the\s+)?([a-z]+ing)\b/i, replacer: (_, g1) => 'Participated in ' + g1 + " " },
+        { regex: /^(?:i\s+)?(?:was\s+)?involved\s+in\s+/i, replacer: () => 'Participated in ' },
+        { regex: /^(?:i\s+)?handled\s+(?:the\s+)?([a-z]+ing)\b/i, replacer: (_, g1) => verbIngToEdTS(g1 || '') + " " },
+        { regex: /^(?:i\s+)?handled\s+/i, replacer: () => 'Managed ' }
     ];
     for (const item of patterns) {
         if (item.regex.test(rewritten)) {
@@ -126,18 +71,388 @@ function rewriteBulletFactGroundedTS(bullet) {
             break;
         }
     }
-    rewritten = rewritten.trim();
+    rewritten = rewritten.replace(/\s+/g, ' ').trim();
     if (rewritten) {
         rewritten = rewritten.charAt(0).toUpperCase() + rewritten.slice(1);
     }
     return { fgRewrite: rewritten, metricNote };
 }
+function calculateResumeQualityScoreTS(resumeData, rawText) {
+    const pInfo = resumeData?.personal_info || {};
+    const skills = Array.isArray(resumeData?.skills) ? resumeData.skills : [];
+    const experience = Array.isArray(resumeData?.experience) ? resumeData.experience : [];
+    const education = Array.isArray(resumeData?.education) ? resumeData.education : [];
+    const projects = Array.isArray(resumeData?.projects) ? resumeData.projects : [];
+    const certifications = Array.isArray(resumeData?.certifications) ? resumeData.certifications : [];
+    const achievements = Array.isArray(resumeData?.achievements) ? resumeData.achievements : [];
+    const summary = String(resumeData?.summary || '');
+    const words = (rawText || '').match(/\b[a-zA-Z0-9_-]+\b/g) || [];
+    if (words.length < 15 && skills.length === 0 && experience.length === 0) {
+        return {
+            overall_quality_score: 0.0,
+            status: "UNREADABLE_OR_EMPTY",
+            message: "Resume contains insufficient readable text to perform quality analysis.",
+            core_sections_detected: [],
+            rubric_breakdown: {
+                contact_info: { score: 0.0, max_score: 15.0, deductions: ["No contact info extracted."] },
+                core_sections: { score: 0.0, max_score: 30.0, deductions: ["No core sections detected."] },
+                content_depth_and_metrics: { score: 0.0, max_score: 25.0, deductions: ["No experience entries found."] },
+                action_verbs: { score: 0.0, max_score: 15.0, deductions: ["No bullets found."] },
+                additional_sections: { score: 0.0, max_score: 15.0, deductions: ["No additional sections."] }
+            },
+            missing_information: ["Full Resume Text"],
+            improvement_suggestions: ["Upload a text-readable PDF or DOCX file."]
+        };
+    }
+    const deductions = {
+        contact_info: [],
+        core_sections: [],
+        content_depth_and_metrics: [],
+        action_verbs: [],
+        additional_sections: []
+    };
+    // 1. Contact Info (15 pts)
+    let contactScore = 0.0;
+    const name = String(pInfo.full_name || '').trim();
+    if (name && !['candidate', 'not found in resume', 'not found', ''].includes(name.toLowerCase())) {
+        contactScore += 5.0;
+    }
+    else {
+        deductions.contact_info.push("Candidate name is missing from resume header (-5 pts)");
+    }
+    const email = String(pInfo.email || '').trim();
+    if (email && email.includes('@') && email.toLowerCase() !== 'not found in resume') {
+        contactScore += 5.0;
+    }
+    else {
+        deductions.contact_info.push("Valid contact email address is missing (-5 pts)");
+    }
+    const phone = String(pInfo.phone || '').trim();
+    if (phone && phone.toLowerCase() !== 'not found in resume') {
+        contactScore += 3.0;
+    }
+    else {
+        deductions.contact_info.push("Contact phone number is missing (-3 pts)");
+    }
+    const links = [pInfo.linkedin_url, pInfo.github_url];
+    const hasValidLink = links.some(l => l && String(l).includes('http'));
+    if (hasValidLink) {
+        contactScore += 2.0;
+    }
+    else {
+        deductions.contact_info.push("Professional profile link (LinkedIn or GitHub) is missing (-2 pts)");
+    }
+    // 2. Core Section Completeness (30 pts)
+    let coreScore = 0.0;
+    if (experience.length > 0) {
+        coreScore += 10.0;
+    }
+    else {
+        deductions.core_sections.push("Work experience section is missing (-10 pts)");
+    }
+    if (education.length > 0) {
+        coreScore += 10.0;
+    }
+    else {
+        deductions.core_sections.push("Education section is missing (-10 pts)");
+    }
+    if (skills.length >= 3) {
+        coreScore += 10.0;
+    }
+    else if (skills.length >= 1) {
+        coreScore += 5.0;
+        deductions.core_sections.push(`Only ${skills.length} skills detected; recommended to list at least 3-5 core technical proficiencies (-5 pts)`);
+    }
+    else {
+        deductions.core_sections.push("Technical skills section is missing (-10 pts)");
+    }
+    // 3. Content Depth & Specificity (25 pts)
+    let depthScore = 0.0;
+    if (experience.length > 0) {
+        let descCount = 0;
+        let hasMetrics = false;
+        let hasDates = false;
+        for (const exp of experience) {
+            const desc = String(exp.description || '').trim();
+            const dur = String(exp.duration || '').trim();
+            if (desc.split(/\s+/).length >= 8)
+                descCount++;
+            if (/\b(?:\d+%\+?|\$\d+|\d+\+?\s*(?:users|qps|ms|k|mb|gb|tb|million|engineers?|teams?))\b/i.test(desc)) {
+                hasMetrics = true;
+            }
+            if (dur && /\b(20\d{2}|19\d{2}|present|current)\b/i.test(dur)) {
+                hasDates = true;
+            }
+        }
+        if (descCount > 0) {
+            depthScore += 10.0;
+        }
+        else {
+            deductions.content_depth_and_metrics.push("Work experience entries lack substantive responsibility details (-10 pts)");
+        }
+        if (hasMetrics) {
+            depthScore += 10.0;
+        }
+        else {
+            deductions.content_depth_and_metrics.push("No quantifiable metrics (percentages, volume, latency) found in experience descriptions (-10 pts)");
+        }
+        if (hasDates) {
+            depthScore += 5.0;
+        }
+        else {
+            deductions.content_depth_and_metrics.push("Verifiable employment dates (e.g. '2021 - 2024') not found on experience entries (-5 pts)");
+        }
+    }
+    else {
+        deductions.content_depth_and_metrics.push("Experience section empty; cannot evaluate depth, metrics, or tenure (-25 pts)");
+    }
+    // 4. Action Verbs & Phrasing (15 pts)
+    let actionScore = 0.0;
+    const passivePhrasesFound = [];
+    let actionVerbCount = 0;
+    let totalBullets = 0;
+    if (experience.length > 0) {
+        for (const exp of experience) {
+            const desc = String(exp.description || '').trim();
+            if (!desc)
+                continue;
+            const lines = desc.split('\n').map(l => l.replace(/^[-*• \t]+/, '').trim()).filter(Boolean);
+            for (const b of lines) {
+                totalBullets++;
+                const firstWord = (b.split(/\s+/)[0] || '').toLowerCase().replace(/[^a-z]/g, '');
+                if (ACTION_VERBS.has(firstWord)) {
+                    actionVerbCount++;
+                }
+                for (const phrase of WEAK_PASSIVE_PHRASES) {
+                    if (b.toLowerCase().includes(phrase) && !passivePhrasesFound.includes(phrase)) {
+                        passivePhrasesFound.push(phrase);
+                    }
+                }
+            }
+        }
+        if (totalBullets > 0 && (actionVerbCount / totalBullets) >= 0.5) {
+            actionScore += 10.0;
+        }
+        else if (actionVerbCount > 0) {
+            actionScore += 5.0;
+            deductions.action_verbs.push(`Only ${actionVerbCount}/${totalBullets} experience bullet lines start with strong action verbs (-5 pts)`);
+        }
+        else {
+            deductions.action_verbs.push("Experience bullets do not start with recognized action verbs (-10 pts)");
+        }
+        if (passivePhrasesFound.length === 0) {
+            actionScore += 5.0;
+        }
+        else {
+            const deductPts = Math.min(5.0, passivePhrasesFound.length * 2.0);
+            actionScore += Math.max(0.0, 5.0 - deductPts);
+            const phrasesStr = passivePhrasesFound.slice(0, 3).map(p => `"${p}"`).join(', ');
+            deductions.action_verbs.push(`Passive phrasing detected (${phrasesStr}) (-${deductPts} pts)`);
+        }
+    }
+    else {
+        deductions.action_verbs.push("No work experience bullets found to evaluate action verbs (-15 pts)");
+    }
+    // 5. Additional Sections (15 pts)
+    let additionalScore = 0.0;
+    if (summary && summary.split(/\s+/).length >= 15) {
+        additionalScore += 5.0;
+    }
+    else if (summary) {
+        additionalScore += 2.5;
+        deductions.additional_sections.push("Professional summary is very brief; consider expanding to 2-3 sentences (-2.5 pts)");
+    }
+    else {
+        deductions.additional_sections.push("Professional summary section is missing (-5 pts)");
+    }
+    if (projects.length > 0) {
+        additionalScore += 5.0;
+    }
+    else {
+        deductions.additional_sections.push("Technical projects section is missing (-5 pts)");
+    }
+    if (certifications.length > 0 || achievements.length > 0) {
+        additionalScore += 5.0;
+    }
+    else {
+        deductions.additional_sections.push("Certifications or achievements section is missing (-5 pts)");
+    }
+    const totalScore = Math.round((contactScore + coreScore + depthScore + actionScore + additionalScore) * 10) / 10;
+    const clampedScore = Math.max(0.0, Math.min(100.0, totalScore));
+    const missingInfo = [];
+    if (!name || name.toLowerCase() === 'candidate')
+        missingInfo.push("Candidate Full Name");
+    if (!email)
+        missingInfo.push("Email Address");
+    if (!phone)
+        missingInfo.push("Phone Number");
+    if (!hasValidLink)
+        missingInfo.push("LinkedIn / Portfolio Link");
+    if (experience.length === 0)
+        missingInfo.push("Work Experience Section");
+    if (education.length === 0)
+        missingInfo.push("Education Section");
+    if (skills.length === 0)
+        missingInfo.push("Technical Skills Section");
+    const suggestions = [];
+    for (const catDeductions of Object.values(deductions)) {
+        for (const d of catDeductions) {
+            suggestions.push(d);
+        }
+    }
+    const coreSectionsDetected = [];
+    if (skills.length > 0)
+        coreSectionsDetected.push("Skills");
+    if (experience.length > 0)
+        coreSectionsDetected.push("Experience");
+    if (education.length > 0)
+        coreSectionsDetected.push("Education");
+    if (projects.length > 0)
+        coreSectionsDetected.push("Projects");
+    if (certifications.length > 0 || achievements.length > 0)
+        coreSectionsDetected.push("Certifications");
+    return {
+        overall_quality_score: clampedScore,
+        word_count: words.length,
+        word_count_status: `${words.length} words detected`,
+        core_sections_detected: coreSectionsDetected,
+        rubric_breakdown: {
+            contact_info: { score: Math.round(contactScore * 10) / 10, max_score: 15.0, deductions: deductions.contact_info },
+            core_sections: { score: Math.round(coreScore * 10) / 10, max_score: 30.0, deductions: deductions.core_sections },
+            content_depth_and_metrics: { score: Math.round(depthScore * 10) / 10, max_score: 25.0, deductions: deductions.content_depth_and_metrics },
+            action_verbs: { score: Math.round(actionScore * 10) / 10, max_score: 15.0, deductions: deductions.action_verbs },
+            additional_sections: { score: Math.round(additionalScore * 10) / 10, max_score: 15.0, deductions: deductions.additional_sections }
+        },
+        missing_information: missingInfo.length > 0 ? missingInfo : ["No critical contact or section information missing."],
+        improvement_suggestions: suggestions.length > 0 ? suggestions : ["Resume meets all core quality standards."]
+    };
+}
+function generateConcreteImprovementsTS(resumeData, rawText, targetJd) {
+    const improvements = [];
+    const pInfo = resumeData?.personal_info || {};
+    const experience = Array.isArray(resumeData?.experience) ? resumeData.experience : [];
+    const skills = Array.isArray(resumeData?.skills) ? resumeData.skills : [];
+    const summary = String(resumeData?.summary || '');
+    // 1. Contact
+    if (!pInfo.phone) {
+        improvements.push({
+            id: "contact_phone",
+            section: "contact",
+            fieldOrBullet: "Phone Number",
+            existingText: "(Not provided)",
+            problem: "Contact phone number is not listed in resume header.",
+            suggestedRevision: "",
+            whyItHelps: "Allows recruiters and hiring managers to quickly initiate phone screening.",
+            isOptional: true
+        });
+    }
+    if (!pInfo.linkedin_url) {
+        improvements.push({
+            id: "contact_linkedin",
+            section: "contact",
+            fieldOrBullet: "LinkedIn Profile",
+            existingText: "(Not provided)",
+            problem: "LinkedIn profile link is missing.",
+            suggestedRevision: "",
+            whyItHelps: "A verified LinkedIn URL helps recruiters confirm your experience and recommendations.",
+            isOptional: true
+        });
+    }
+    // 2. Summary
+    if (!summary || summary.trim().length < 10) {
+        const topSkills = skills.slice(0, 4).join(', ') || 'relevant technical capabilities';
+        improvements.push({
+            id: "summary_missing",
+            section: "summary",
+            fieldOrBullet: "Professional Summary",
+            existingText: "(No summary)",
+            problem: "Resume does not include a professional summary.",
+            suggestedRevision: `Software Engineer with experience in ${topSkills}. Dedicated to building reliable, high-performance systems.`,
+            whyItHelps: "A concise 2-3 sentence overview immediately establishes your domain focus for recruiters.",
+            isOptional: true
+        });
+    }
+    // 3. Experience Bullets
+    experience.forEach((exp, expIdx) => {
+        const role = exp.role || 'Experience entry';
+        const company = exp.company || '';
+        const roleLabel = `${role}${company ? ` @ ${company}` : ''}`;
+        const desc = String(exp.description || '').trim();
+        if (!desc)
+            return;
+        const lines = desc.split('\n').map(l => l.replace(/^[-*• \t]+/, '').trim()).filter(Boolean);
+        lines.forEach((line, lineIdx) => {
+            const { fgRewrite } = rewriteBulletFactGroundedTS(line);
+            const foundPassive = WEAK_PASSIVE_PHRASES.filter(p => line.toLowerCase().includes(p));
+            if (foundPassive.length > 0 && fgRewrite.toLowerCase() !== line.toLowerCase()) {
+                improvements.push({
+                    id: `exp_rewrite_${expIdx}_${lineIdx}`,
+                    section: "experience",
+                    fieldOrBullet: `${roleLabel} (Bullet #${lineIdx + 1})`,
+                    existingText: line,
+                    problem: `Contains passive phrasing "${foundPassive[0]}".`,
+                    suggestedRevision: fgRewrite,
+                    whyItHelps: "Starting with an active verb demonstrates direct initiative and ownership.",
+                    isOptional: false,
+                    expIndex: expIdx,
+                    bulletIndex: lineIdx
+                });
+            }
+            const hasMetric = /\b(?:\d+%\+?|\$\d+|\d+\+?\s*(?:users|qps|ms|k|mb|gb|tb|million|engineers?|teams?))\b/i.test(line);
+            if (!hasMetric && line.split(/\s+/).length >= 8) {
+                improvements.push({
+                    id: `exp_metric_${expIdx}_${lineIdx}`,
+                    section: "experience",
+                    fieldOrBullet: `${roleLabel} (Bullet #${lineIdx + 1})`,
+                    existingText: line,
+                    problem: "Description lacks quantifiable metrics or impact scale.",
+                    suggestedRevision: line + " (e.g., resulting in measurable performance improvement)",
+                    whyItHelps: "Quantifiable metrics give recruiters concrete evidence of your engineering scope. (Add your genuine metrics; do not fabricate numbers).",
+                    isOptional: true,
+                    expIndex: expIdx,
+                    bulletIndex: lineIdx
+                });
+            }
+        });
+    });
+    // 4. Target JD Skill Gaps
+    if (targetJd && targetJd.trim()) {
+        const { reqSkills, prefSkills } = (0, ats_engine_1.parseJDSections)(targetJd);
+        const resSkillsLower = new Set(skills.map(s => s.toLowerCase()));
+        for (const req of reqSkills) {
+            if (!resSkillsLower.has(req.toLowerCase())) {
+                improvements.push({
+                    id: `req_skill_${req.toLowerCase()}`,
+                    section: "skills",
+                    fieldOrBullet: `Required Skill: ${req}`,
+                    existingText: "(Not in resume)",
+                    problem: `Target job description lists "${req}" as a required qualification, but it is absent from your resume.`,
+                    suggestedRevision: req,
+                    whyItHelps: `Adding "${req}" directly improves ATS required-skills match from 0% to credited. Only add if you possess actual hands-on experience.`,
+                    isOptional: false
+                });
+            }
+        }
+        for (const pref of prefSkills) {
+            if (!resSkillsLower.has(pref.toLowerCase())) {
+                improvements.push({
+                    id: `pref_skill_${pref.toLowerCase()}`,
+                    section: "skills",
+                    fieldOrBullet: `Preferred Skill: ${pref}`,
+                    existingText: "(Not in resume)",
+                    problem: `Target job lists "${pref}" as a preferred/bonus qualification.`,
+                    suggestedRevision: pref,
+                    whyItHelps: `Listing "${pref}" earns preferred skills credit in employer ATS screening.`,
+                    isOptional: true
+                });
+            }
+        }
+    }
+    return improvements;
+}
 function analyzeResumeContentTS(resumeData, rawText, targetJobDescription) {
     const raw = rawText || resumeData?.raw_text || "";
     const pInfo = resumeData?.personal_info || {};
-    // -------------------------------------------------------------
-    // LAYER 1: EXTRACTED FACTS (Factual Baseline)
-    // -------------------------------------------------------------
     const extractedFacts = {
         personal_info: {
             full_name: pInfo.full_name || "Not found in resume",
@@ -155,105 +470,8 @@ function analyzeResumeContentTS(resumeData, rawText, targetJobDescription) {
         certifications: Array.isArray(resumeData?.certifications) ? resumeData.certifications : [],
         achievements: Array.isArray(resumeData?.achievements) ? resumeData.achievements : []
     };
-    // -------------------------------------------------------------
-    // LAYER 2: QUALITY AUDIT & SUGGESTIONS
-    // -------------------------------------------------------------
-    const suggestions = [];
-    const missingInfo = [];
-    const auditNotes = [];
-    if (!pInfo.email) {
-        missingInfo.push("Email address: Not found in resume header.");
-        suggestions.push("Ensure your primary email address is clearly listed at the top of your resume.");
-    }
-    if (!pInfo.phone) {
-        missingInfo.push("Phone number: Not found in resume.");
-        suggestions.push("Consider adding a contact phone number for recruiters.");
-    }
-    if (!pInfo.linkedin_url) {
-        missingInfo.push("LinkedIn profile: Not found in resume.");
-        suggestions.push("Including a LinkedIn profile link helps recruiters verify your professional background.");
-    }
-    const words = raw.match(/\b[a-zA-Z0-9_-]+\b/g) || [];
-    const wordCount = words.length;
-    if (wordCount < 150) {
-        auditNotes.push(`Brief resume length detected (${wordCount} words).`);
-        suggestions.push("Your resume text is concise. Consider elaborating on key technical responsibilities and project details.");
-    }
-    else if (wordCount > 900) {
-        auditNotes.push(`Extended resume length detected (${wordCount} words).`);
-        suggestions.push("Your resume exceeds 900 words. Consider tightening bullet points for maximum readability.");
-    }
-    else {
-        auditNotes.push(`Optimal resume length (${wordCount} words).`);
-    }
-    const coreSections = [];
-    if (extractedFacts.skills.length > 0)
-        coreSections.push("Skills");
-    else {
-        missingInfo.push("Technical Skills section: Not found in resume.");
-        suggestions.push("Create a distinct 'Technical Skills' section listing your primary programming languages and frameworks.");
-    }
-    if (extractedFacts.experience.length > 0)
-        coreSections.push("Experience");
-    else {
-        missingInfo.push("Work Experience section: Not found in resume.");
-        suggestions.push("Include a 'Work Experience' or 'Professional Experience' section with role titles and dates.");
-    }
-    if (extractedFacts.education.length > 0)
-        coreSections.push("Education");
-    else {
-        missingInfo.push("Education section: Not found in resume.");
-        suggestions.push("List your academic background under an 'Education' section.");
-    }
-    const weakVerbsFound = [];
-    const bulletsWithoutMetrics = [];
-    for (const exp of extractedFacts.experience) {
-        const desc = String(exp.description || '');
-        if (!desc)
-            continue;
-        const descLower = desc.toLowerCase();
-        for (const phrase of WEAK_PASSIVE_PHRASES) {
-            if (descLower.includes(phrase) && !weakVerbsFound.includes(phrase)) {
-                weakVerbsFound.push(phrase);
-            }
-        }
-        const hasMetric = /\b(\d+%|\d+\+|\$\d+|\d+\s*users|\d+\s*ms|\d+\s*k)\b/i.test(desc);
-        if (!hasMetric) {
-            bulletsWithoutMetrics.push(exp.role || "Experience entry");
-        }
-    }
-    if (weakVerbsFound.length > 0) {
-        const phrasesStr = weakVerbsFound.slice(0, 3).map(p => `"${p}"`).join(', ');
-        suggestions.push(`Passive phrasing detected (${phrasesStr}). Replace passive phrases with strong action verbs (e.g. Engineered, Architected, Developed).`);
-    }
-    if (bulletsWithoutMetrics.length > 0) {
-        suggestions.push("Some work experience entries lack quantifiable metrics. If you have verified metrics (e.g., user count, query speed, project scope), consider adding them. Otherwise, do not fabricate numbers.");
-    }
-    const qualityScore = Math.round(Math.min(100.0, Math.max(20.0, 40.0 + (coreSections.length * 15.0) + (pInfo.email ? 10.0 : 0) + (weakVerbsFound.length === 0 ? 10.0 : 0))) * 10) / 10;
-    const qualityAudit = {
-        overall_quality_score: qualityScore,
-        word_count: wordCount,
-        word_count_status: `${wordCount} words detected`,
-        core_sections_detected: coreSections,
-        missing_information: missingInfo.length > 0 ? missingInfo : ["No critical contact or section information missing."],
-        audit_notes: auditNotes,
-        improvement_suggestions: suggestions
-    };
-    // -------------------------------------------------------------
-    // LAYER 3: FACT-GROUNDED REWRITES (Zero Metric Invention)
-    // -------------------------------------------------------------
-    const origSummary = String(resumeData?.summary || '');
-    let rewrittenSummary = "";
-    if (origSummary.trim()) {
-        rewrittenSummary = origSummary.trim();
-        if (extractedFacts.skills.length > 0) {
-            const topSk = extractedFacts.skills.slice(0, 5).join(', ');
-            rewrittenSummary += ` Core competencies include ${topSk}.`;
-        }
-    }
-    else {
-        rewrittenSummary = "Not available (Summary section missing from original resume).";
-    }
+    const qualityAudit = calculateResumeQualityScoreTS(resumeData, raw);
+    const improvements = generateConcreteImprovementsTS(resumeData, raw, targetJobDescription);
     const bulletRewrites = [];
     for (const exp of extractedFacts.experience) {
         const role = exp.role || "Not found in resume";
@@ -273,118 +491,54 @@ function analyzeResumeContentTS(resumeData, rawText, targetJobDescription) {
         });
     }
     const factGroundedRewrites = {
-        original_summary: origSummary.trim() ? origSummary : "Not found in resume",
-        fact_grounded_summary: rewrittenSummary,
+        original_summary: resumeData?.summary || "Not found in resume",
+        fact_grounded_summary: resumeData?.summary || "Not found in resume",
         bullet_rewrites: bulletRewrites,
+        improvements,
         rewriting_rule: "Rewrites use ONLY facts extracted from original resume. Zero fictional skills, metrics, or experience generated."
     };
-    let targetJobGap = null;
+    let jobMatch = null;
     if (targetJobDescription && targetJobDescription.trim()) {
-        const { extractTechKeywords } = require('./ats_engine');
-        const jdSkills = new Set(extractTechKeywords(targetJobDescription));
-        const resSkills = new Set(extractedFacts.skills);
-        const matched = Array.from(jdSkills).filter(s => resSkills.has(s)).sort();
-        const missing = Array.from(jdSkills).filter(s => !resSkills.has(s)).sort();
-        targetJobGap = {
-            matched_skills: matched,
-            missing_skills: missing,
-            guidance: "Only add missing skills to your resume if you possess genuine hands-on experience with them."
-        };
+        jobMatch = (0, ats_engine_1.calculateDeterministicATSScore)(raw, targetJobDescription, resumeData);
     }
     return {
         extracted_facts: extractedFacts,
         quality_audit: qualityAudit,
         fact_grounded_rewrites: factGroundedRewrites,
-        target_job_gap: targetJobGap
+        improvements,
+        job_match: jobMatch
     };
 }
 function optimizeResumeContentTS(resumeData, targetJobDescription, targetJobTitle) {
-    const { extractTechKeywords } = require('./ats_engine');
+    // Grounded optimization: creates actionable improvements without mutating the user's authentic facts
     const existingSkills = Array.isArray(resumeData?.skills) ? resumeData.skills : [];
-    const targetKeywords = targetJobDescription ? extractTechKeywords(targetJobDescription) : [];
+    const targetKeywords = targetJobDescription ? (0, ats_engine_1.extractTechKeywords)(targetJobDescription) : [];
     const existingLower = new Set(existingSkills.map(s => s.toLowerCase()));
     const targetLower = new Set(targetKeywords.map(k => k.toLowerCase()));
     const matchingSkills = existingSkills.filter(s => targetLower.has(s.toLowerCase()));
-    const otherSkills = existingSkills.filter(s => !targetLower.has(s.toLowerCase()));
     const missingSkills = targetKeywords.filter(k => !existingLower.has(k.toLowerCase()));
-    const optimizedSkills = [...matchingSkills, ...otherSkills];
-    const originalSummary = String(resumeData?.summary || '').trim();
-    const roleTitle = targetJobTitle || 'Target Role';
-    let optimizedSummary = '';
-    if (originalSummary) {
-        optimizedSummary = `Targeted ${roleTitle} professional. ${originalSummary}`;
-        if (matchingSkills.length > 0) {
-            optimizedSummary += ` Key aligned competencies include ${matchingSkills.slice(0, 4).join(', ')}.`;
-        }
-    }
-    else {
-        optimizedSummary = `Targeted ${roleTitle} candidate with focus on ${matchingSkills.length > 0 ? matchingSkills.slice(0, 4).join(', ') : 'relevant technical capabilities'}.`;
-    }
-    const rawExp = Array.isArray(resumeData?.experience) ? resumeData.experience : [];
-    const optimizedExperience = [];
-    const suggestedRewrites = [];
-    for (let i = 0; i < rawExp.length; i++) {
-        const exp = rawExp[i];
-        const role = exp?.role || '';
-        const company = exp?.company || '';
-        const duration = exp?.duration || '';
-        const desc = String(exp?.description || '');
-        optimizedExperience.push({
-            role,
-            company,
-            duration,
-            description: desc
-        });
-        if (desc) {
-            const { fgRewrite, metricNote } = rewriteBulletFactGroundedTS(desc);
-            if (fgRewrite && fgRewrite.trim().toLowerCase() !== desc.trim().toLowerCase()) {
-                suggestedRewrites.push({
-                    section: 'experience',
-                    itemIndex: i,
-                    field: 'description',
-                    role,
-                    company,
-                    original: desc,
-                    suggested: fgRewrite,
-                    reason: 'Replaces passive phrasing with strong action verb while preserving original facts.',
-                    metricGuidance: metricNote
-                });
-            }
-        }
-    }
-    const optimizedData = {
-        personal_info: resumeData?.personal_info || {},
-        target_job_title: targetJobTitle,
-        summary: optimizedSummary,
-        skills: optimizedSkills,
-        education: Array.isArray(resumeData?.education) ? resumeData.education : [],
-        experience: optimizedExperience,
-        projects: Array.isArray(resumeData?.projects) ? resumeData.projects : [],
-        certifications: Array.isArray(resumeData?.certifications) ? resumeData.certifications : [],
-        achievements: Array.isArray(resumeData?.achievements) ? resumeData.achievements : []
-    };
-    if (resumeData?.raw_text) {
-        optimizedData.raw_text = resumeData.raw_text;
-    }
+    const improvements = generateConcreteImprovementsTS(resumeData, resumeData?.raw_text || '', targetJobDescription);
+    const suggestedRewrites = improvements
+        .filter((imp) => imp.section === 'experience' && imp.suggestedRevision)
+        .map((imp) => ({
+        section: 'experience',
+        itemIndex: imp.expIndex,
+        bulletIndex: imp.bulletIndex,
+        original: imp.existingText,
+        suggested: imp.suggestedRevision,
+        reason: imp.problem + " " + imp.whyItHelps
+    }));
     return {
-        original_content: {
-            personal_info: resumeData?.personal_info || {},
-            summary: originalSummary,
-            skills: existingSkills,
-            experience: resumeData?.experience || [],
-            education: resumeData?.education || [],
-            projects: resumeData?.projects || [],
-            certifications: resumeData?.certifications || [],
-            achievements: resumeData?.achievements || []
-        },
-        optimized_content: optimizedData,
+        original_content: { ...resumeData },
+        optimized_content: { ...resumeData },
         matched_skills: matchingSkills,
         missing_keywords: missingSkills,
         suggested_rewrites: suggestedRewrites,
+        improvements,
         optimization_notes: [
             `Identified ${matchingSkills.length} skills matching target job description.`,
-            `Found ${missingSkills.length} missing keywords. Add to skills only if genuine experience exists.`,
-            'Maintained strict factual accuracy based on user\'s uploaded resume.'
+            `Found ${missingSkills.length} missing keywords from job description. Add to skills only if genuine experience exists.`,
+            'Maintained strict factual integrity based on user\'s uploaded resume. Zero fabricated information.'
         ]
     };
 }

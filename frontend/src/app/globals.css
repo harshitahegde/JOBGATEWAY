@@ -35,3 +35,85 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: #94a3b8;
 }
+
+/* Print Stylesheet for Clean Resume Export */
+@media print {
+  @page {
+    margin: 12mm 15mm;
+    size: auto;
+  }
+
+  html, body {
+    background: #ffffff !important;
+    color: #0f172a !important;
+    font-size: 11pt !important;
+    line-height: 1.4 !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    min-height: auto !important;
+  }
+
+  /* Hide entire web application UI */
+  nav,
+  header,
+  aside,
+  button,
+  input,
+  textarea,
+  select,
+  .no-print,
+  .print-hide,
+  .resume-screen-ui {
+    display: none !important;
+  }
+
+  /* Make sure main content container expands cleanly */
+  main,
+  .max-w-6xl,
+  .max-w-5xl {
+    max-width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  /* Printable Resume Document */
+  .resume-printable-document {
+    display: block !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: none !important;
+    box-shadow: none !important;
+    background: #ffffff !important;
+  }
+
+  .resume-printable-document h1 {
+    font-size: 22pt !important;
+    color: #0f172a !important;
+    font-weight: 800 !important;
+    margin-bottom: 4pt !important;
+  }
+
+  .resume-printable-document h2 {
+    font-size: 12pt !important;
+    color: #1e3a8a !important;
+    font-weight: 700 !important;
+    border-bottom: 1px solid #cbd5e1 !important;
+    padding-bottom: 2pt !important;
+    margin-top: 10pt !important;
+    margin-bottom: 6pt !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.5px !important;
+  }
+
+  .print-section-item {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+    margin-bottom: 8pt !important;
+  }
+
+  a {
+    text-decoration: none !important;
+    color: inherit !important;
+  }
+}

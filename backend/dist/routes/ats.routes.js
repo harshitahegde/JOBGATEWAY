@@ -4,6 +4,7 @@ const express_1 = require("express");
 const db_1 = require("../db");
 const auth_1 = require("../middleware/auth");
 const providers_1 = require("../providers");
+const resume_routes_1 = require("./resume.routes");
 const router = (0, express_1.Router)();
 // POST /api/ats/analyze
 router.post('/analyze', auth_1.authenticateToken, async (req, res) => {
@@ -31,12 +32,7 @@ router.post('/analyze', auth_1.authenticateToken, async (req, res) => {
             if (resume.parsedContent) {
                 try {
                     parsedResumeObj = JSON.parse(resume.parsedContent);
-                    if (parsedResumeObj.raw_text) {
-                        textToAnalyze = parsedResumeObj.raw_text;
-                    }
-                    else {
-                        textToAnalyze = `${parsedResumeObj.summary || ''} ${Array.isArray(parsedResumeObj.skills) ? parsedResumeObj.skills.join(' ') : ''} ${JSON.stringify(parsedResumeObj.experience || [])}`;
-                    }
+                    textToAnalyze = (0, resume_routes_1.reconstructResumeText)(parsedResumeObj);
                 }
                 catch (e) {
                     console.warn('[ATS ROUTE] Error parsing stored resume JSON:', e);

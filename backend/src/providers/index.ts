@@ -42,6 +42,7 @@ export { EmailProvider, EmailSendResult } from './email_provider';
 import { calculateDeterministicATSScore } from '../ats_engine';
 import { analyzeResumeContentTS, optimizeResumeContentTS } from '../resume_analyzer_ts';
 import { generateFactGroundedOutreach, OutreachGenerateInput, OutreachGenerateResult } from '../outreach_generator';
+import { parseResumeFileTS } from '../resume_parser_ts';
 
 export interface AIProvider {
   parseResume(filePath: string): Promise<any>;
@@ -62,22 +63,14 @@ export class RealOrMockAIProvider implements AIProvider {
       });
       return response.data;
     } catch (err: any) {
-      console.warn('[AI PROVIDER] FastAPI /parse-resume failed, using basic text fallback:', err.message);
-      return {
-        filename: path.basename(filePath),
-        raw_text: "",
-        parsed_data: {
-          personal_info: { full_name: "Candidate", email: "", phone: "", location: "", linkedin_url: "", github_url: "" },
-          summary: "",
-          skills: [],
-          education: [],
-          experience: [],
-          projects: [],
-          certifications: [],
-          achievements: [],
-          raw_text: ""
-        }
-      };
+      if (err.response && (err.response.status === 400 || err.response.status === 422)) {
+        return {
+          error: 'NO_EXTRACTABLE_TEXT',
+          message: err.response.data?.detail || 'This document appears to be a scanned image or contains no selectable text. JobGateway currently requires text-based PDF or DOCX files (optical character recognition / OCR for scanned images is not yet supported). Please upload a text-selectable PDF or DOCX version, or paste your resume text.'
+        };
+      }
+      console.warn('[AI PROVIDER] FastAPI /parse-resume offline or network error, executing local TypeScript parser:', err.message);
+      return parseResumeFileTS(filePath);
     }
   }
 

@@ -3,6 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.reconstructResumeText = reconstructResumeText;
 const express_1 = require("express");
 const multer_1 = __importDefault(require("multer"));
 const path_1 = __importDefault(require("path"));
@@ -63,6 +64,51 @@ function safeJsonParse(val, fallback) {
         return fallback;
     }
 }
+function reconstructResumeText(content) {
+    if (!content)
+        return '';
+    if (content.raw_text && typeof content.raw_text === 'string' && content.raw_text.trim()) {
+        return content.raw_text.trim();
+    }
+    const parts = [];
+    if (content.personal_info?.full_name)
+        parts.push(content.personal_info.full_name);
+    if (content.personal_info?.email)
+        parts.push(content.personal_info.email);
+    if (content.personal_info?.phone)
+        parts.push(content.personal_info.phone);
+    if (content.personal_info?.location)
+        parts.push(content.personal_info.location);
+    if (content.personal_info?.linkedin_url)
+        parts.push(content.personal_info.linkedin_url);
+    if (content.personal_info?.github_url)
+        parts.push(content.personal_info.github_url);
+    if (content.summary)
+        parts.push(`Summary:\n${content.summary}`);
+    if (Array.isArray(content.skills) && content.skills.length > 0) {
+        parts.push(`Skills:\n${content.skills.join(', ')}`);
+    }
+    if (Array.isArray(content.experience) && content.experience.length > 0) {
+        const expText = content.experience.map((e) => `${e.role || ''} ${e.company ? `@ ${e.company}` : ''} ${e.duration || ''}\n${e.description || ''}`).join('\n\n');
+        parts.push(`Experience:\n${expText}`);
+    }
+    if (Array.isArray(content.education) && content.education.length > 0) {
+        const eduText = content.education.map((ed) => `${ed.degree || ''} ${ed.institution ? `- ${ed.institution}` : ''} ${ed.year ? `(${ed.year})` : ''}`).join('\n');
+        parts.push(`Education:\n${eduText}`);
+    }
+    if (Array.isArray(content.projects) && content.projects.length > 0) {
+        const projText = content.projects.map((p) => `${p.title || p.name || ''}: ${p.description || ''}`).join('\n');
+        parts.push(`Projects:\n${projText}`);
+    }
+    if (Array.isArray(content.certifications) && content.certifications.length > 0) {
+        const certText = content.certifications.map((c) => typeof c === 'string' ? c : `${c.name || ''} ${c.issuer ? `- ${c.issuer}` : ''}`).join(', ');
+        parts.push(`Certifications:\n${certText}`);
+    }
+    if (Array.isArray(content.achievements) && content.achievements.length > 0) {
+        parts.push(`Achievements:\n${content.achievements.join(', ')}`);
+    }
+    return parts.join('\n\n');
+}
 // POST /api/resumes/upload
 router.post('/upload', auth_1.authenticateToken, handleResumeUpload, async (req, res) => {
     try {
@@ -71,18 +117,23 @@ router.post('/upload', auth_1.authenticateToken, handleResumeUpload, async (req,
             return res.status(400).json({ error: 'No resume file uploaded' });
         }
         const { originalname, filename, path: filePath, mimetype } = req.file;
-        // Perform actual parsing using FastAPI / Python AI service provider
+        // Perform actual parsing using FastAPI / Python AI service provider or local TS parser
         const parseResult = await providers_1.providers.ai.parseResume(filePath);
-        const parsedData = parseResult.parsed_data || {
-            personal_info: { full_name: "Candidate", email: req.user.email, phone: "", location: "" },
-            summary: parseResult.raw_text ? parseResult.raw_text.slice(0, 300) : "",
-            skills: [],
-            education: [],
-            experience: [],
-            projects: [],
-            certifications: [],
-            achievements: []
-        };
+        if (parseResult.error) {
+            return res.status(400).json({
+                error: parseResult.message || parseResult.error
+            });
+        }
+        const parsedData = parseResult.parsed_data;
+        if (!parsedData) {
+            return res.status(400).json({
+                error: 'Unable to extract structured information from this resume file.'
+            });
+        }
+        // Ensure raw_text is always retained in parsed content for downstream ATS analysis
+        if (!parsedData.raw_text && parseResult.raw_text) {
+            parsedData.raw_text = parseResult.raw_text;
+        }
         const resume = await db_1.prisma.resume.create({
             data: {
                 userId,
@@ -313,6 +364,16 @@ router.post('/:id/optimize', auth_1.authenticateToken, async (req, res) => {
                 content: JSON.stringify(completeOptimizedResume)
             }
         });
+        const optPayload = {
+            ...optimized,
+            ...completeOptimizedResume,
+            optimized_content: completeOptimizedResume,
+            original_content: optimized.original_content || currentContent,
+            matched_skills: optimized.matched_skills || [],
+            missing_keywords: optimized.missing_keywords || [],
+            suggested_rewrites: optimized.suggested_rewrites || [],
+            improvements: optimized.improvements || []
+        };
         return res.json({
             message: 'Resume optimized successfully',
             versionId: version.id,
@@ -320,10 +381,11 @@ router.post('/:id/optimize', auth_1.authenticateToken, async (req, res) => {
                 ...version,
                 content: completeOptimizedResume
             },
-            optimizedContent: completeOptimizedResume,
+            optimizedContent: optPayload,
             matchedSkills: optimized.matched_skills || [],
             missingKeywords: optimized.missing_keywords || [],
             suggestedRewrites: optimized.suggested_rewrites || [],
+            improvements: optimized.improvements || [],
             optimizationNotes: optimized.optimization_notes || []
         });
     }
@@ -341,7 +403,7 @@ router.post('/:id/analyze', auth_1.authenticateToken, async (req, res) => {
         if (!resume)
             return res.status(404).json({ error: 'Resume not found' });
         const currentContent = resume.parsedContent ? JSON.parse(resume.parsedContent) : {};
-        const rawText = currentContent.raw_text || `${currentContent.summary || ''} ${(currentContent.skills || []).join(' ')}`;
+        const rawText = reconstructResumeText(currentContent);
         const analysis = await providers_1.providers.ai.analyzeResume(currentContent, rawText, targetJobDescription || "");
         return res.json({
             message: 'Resume quality analysis completed',
@@ -360,7 +422,8 @@ router.post('/analyze-raw', auth_1.authenticateToken, async (req, res) => {
             return res.status(400).json({ error: 'Please provide resume data or resume text for analysis.' });
         }
         const dataObj = resumeData || { summary: rawText, skills: [], experience: [], education: [] };
-        const analysis = await providers_1.providers.ai.analyzeResume(dataObj, rawText || "", targetJobDescription || "");
+        const text = rawText || reconstructResumeText(dataObj);
+        const analysis = await providers_1.providers.ai.analyzeResume(dataObj, text || "", targetJobDescription || "");
         return res.json({
             message: 'Resume quality analysis completed',
             analysis

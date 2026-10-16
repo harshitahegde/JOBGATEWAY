@@ -7,7 +7,6 @@ exports.providers = exports.RealOrMockAIProvider = exports.UnconfiguredEmailFind
 const form_data_1 = __importDefault(require("form-data"));
 const axios_1 = __importDefault(require("axios"));
 const fs_1 = __importDefault(require("fs"));
-const path_1 = __importDefault(require("path"));
 const USE_MOCK_SERVICES = process.env.USE_MOCK_SERVICES !== 'false';
 const AI_SERVICE_URL = process.env.AI_SERVICE_URL || 'http://localhost:8000';
 const SMTP_HOST = process.env.SMTP_HOST;
@@ -36,6 +35,7 @@ const email_provider_1 = require("./email_provider");
 const ats_engine_1 = require("../ats_engine");
 const resume_analyzer_ts_1 = require("../resume_analyzer_ts");
 const outreach_generator_1 = require("../outreach_generator");
+const resume_parser_ts_1 = require("../resume_parser_ts");
 class RealOrMockAIProvider {
     async parseResume(filePath) {
         try {
@@ -48,22 +48,14 @@ class RealOrMockAIProvider {
             return response.data;
         }
         catch (err) {
-            console.warn('[AI PROVIDER] FastAPI /parse-resume failed, using basic text fallback:', err.message);
-            return {
-                filename: path_1.default.basename(filePath),
-                raw_text: "",
-                parsed_data: {
-                    personal_info: { full_name: "Candidate", email: "", phone: "", location: "", linkedin_url: "", github_url: "" },
-                    summary: "",
-                    skills: [],
-                    education: [],
-                    experience: [],
-                    projects: [],
-                    certifications: [],
-                    achievements: [],
-                    raw_text: ""
-                }
-            };
+            if (err.response && (err.response.status === 400 || err.response.status === 422)) {
+                return {
+                    error: 'NO_EXTRACTABLE_TEXT',
+                    message: err.response.data?.detail || 'This document appears to be a scanned image or contains no selectable text. JobGateway currently requires text-based PDF or DOCX files (optical character recognition / OCR for scanned images is not yet supported). Please upload a text-selectable PDF or DOCX version, or paste your resume text.'
+                };
+            }
+            console.warn('[AI PROVIDER] FastAPI /parse-resume offline or network error, executing local TypeScript parser:', err.message);
+            return (0, resume_parser_ts_1.parseResumeFileTS)(filePath);
         }
     }
     async calculateATSScore(resumeText, jobDescription, parsedResume) {

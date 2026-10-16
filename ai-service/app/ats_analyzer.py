@@ -37,6 +37,7 @@ SYNONYM_MAP = {
     "py": "Python", "python": "Python",
     "go": "Go", "golang": "Go",
     "java": "Java",
+    "c": "C",
     "c#": "C#", "csharp": "C#",
     "c++": "C++", "cpp": "C++",
     "html": "HTML", "html5": "HTML",
@@ -158,7 +159,7 @@ def parse_jd_sections(job_description: str) -> Tuple[List[str], List[str], List[
         if any(h in l_lower for h in ["required skills", "requirements", "qualifications", "must have", "what you need", "basic qualifications", "who you are"]):
             current_mode = 'req'
             continue
-        elif any(h in l_lower for h in ["preferred skills", "preferred qualifications", "nice to have", "pluses", "desirable", "bonus points", "additional skills"]):
+        elif any(h in l_lower for h in ["preferred skills", "preferred qualifications", "preferred", "nice to have", "pluses", "desirable", "bonus points", "additional skills"]):
             current_mode = 'pref'
             continue
             

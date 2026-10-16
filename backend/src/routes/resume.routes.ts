@@ -61,6 +61,52 @@ function safeJsonParse<T>(val: any, fallback: T): T {
   }
 }
 
+export function reconstructResumeText(content: any): string {
+  if (!content) return '';
+  if (content.raw_text && typeof content.raw_text === 'string' && content.raw_text.trim()) {
+    return content.raw_text.trim();
+  }
+  const parts: string[] = [];
+  if (content.personal_info?.full_name) parts.push(content.personal_info.full_name);
+  if (content.personal_info?.email) parts.push(content.personal_info.email);
+  if (content.personal_info?.phone) parts.push(content.personal_info.phone);
+  if (content.personal_info?.location) parts.push(content.personal_info.location);
+  if (content.personal_info?.linkedin_url) parts.push(content.personal_info.linkedin_url);
+  if (content.personal_info?.github_url) parts.push(content.personal_info.github_url);
+  if (content.summary) parts.push(`Summary:\n${content.summary}`);
+  if (Array.isArray(content.skills) && content.skills.length > 0) {
+    parts.push(`Skills:\n${content.skills.join(', ')}`);
+  }
+  if (Array.isArray(content.experience) && content.experience.length > 0) {
+    const expText = content.experience.map((e: any) =>
+      `${e.role || ''} ${e.company ? `@ ${e.company}` : ''} ${e.duration || ''}\n${e.description || ''}`
+    ).join('\n\n');
+    parts.push(`Experience:\n${expText}`);
+  }
+  if (Array.isArray(content.education) && content.education.length > 0) {
+    const eduText = content.education.map((ed: any) =>
+      `${ed.degree || ''} ${ed.institution ? `- ${ed.institution}` : ''} ${ed.year ? `(${ed.year})` : ''}`
+    ).join('\n');
+    parts.push(`Education:\n${eduText}`);
+  }
+  if (Array.isArray(content.projects) && content.projects.length > 0) {
+    const projText = content.projects.map((p: any) =>
+      `${p.title || p.name || ''}: ${p.description || ''}`
+    ).join('\n');
+    parts.push(`Projects:\n${projText}`);
+  }
+  if (Array.isArray(content.certifications) && content.certifications.length > 0) {
+    const certText = content.certifications.map((c: any) =>
+      typeof c === 'string' ? c : `${c.name || ''} ${c.issuer ? `- ${c.issuer}` : ''}`
+    ).join(', ');
+    parts.push(`Certifications:\n${certText}`);
+  }
+  if (Array.isArray(content.achievements) && content.achievements.length > 0) {
+    parts.push(`Achievements:\n${content.achievements.join(', ')}`);
+  }
+  return parts.join('\n\n');
+}
+
 // POST /api/resumes/upload
 router.post('/upload', authenticateToken, handleResumeUpload, async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -71,18 +117,26 @@ router.post('/upload', authenticateToken, handleResumeUpload, async (req: Authen
 
     const { originalname, filename, path: filePath, mimetype } = req.file;
 
-    // Perform actual parsing using FastAPI / Python AI service provider
+    // Perform actual parsing using FastAPI / Python AI service provider or local TS parser
     const parseResult = await providers.ai.parseResume(filePath);
-    const parsedData = parseResult.parsed_data || {
-      personal_info: { full_name: "Candidate", email: req.user!.email, phone: "", location: "" },
-      summary: parseResult.raw_text ? parseResult.raw_text.slice(0, 300) : "",
-      skills: [],
-      education: [],
-      experience: [],
-      projects: [],
-      certifications: [],
-      achievements: []
-    };
+    
+    if (parseResult.error) {
+      return res.status(400).json({
+        error: parseResult.message || parseResult.error
+      });
+    }
+
+    const parsedData = parseResult.parsed_data;
+    if (!parsedData) {
+      return res.status(400).json({
+        error: 'Unable to extract structured information from this resume file.'
+      });
+    }
+
+    // Ensure raw_text is always retained in parsed content for downstream ATS analysis
+    if (!parsedData.raw_text && parseResult.raw_text) {
+      parsedData.raw_text = parseResult.raw_text;
+    }
 
     const resume = await prisma.resume.create({
       data: {
@@ -343,7 +397,8 @@ router.post('/:id/optimize', authenticateToken, async (req: AuthenticatedRequest
       original_content: optimized.original_content || currentContent,
       matched_skills: optimized.matched_skills || [],
       missing_keywords: optimized.missing_keywords || [],
-      suggested_rewrites: optimized.suggested_rewrites || []
+      suggested_rewrites: optimized.suggested_rewrites || [],
+      improvements: optimized.improvements || []
     };
 
     return res.json({
@@ -357,6 +412,7 @@ router.post('/:id/optimize', authenticateToken, async (req: AuthenticatedRequest
       matchedSkills: optimized.matched_skills || [],
       missingKeywords: optimized.missing_keywords || [],
       suggestedRewrites: optimized.suggested_rewrites || [],
+      improvements: optimized.improvements || [],
       optimizationNotes: optimized.optimization_notes || []
     });
   } catch (err: any) {
@@ -375,7 +431,7 @@ router.post('/:id/analyze', authenticateToken, async (req: AuthenticatedRequest,
     if (!resume) return res.status(404).json({ error: 'Resume not found' });
 
     const currentContent = resume.parsedContent ? JSON.parse(resume.parsedContent) : {};
-    const rawText = currentContent.raw_text || `${currentContent.summary || ''} ${(currentContent.skills || []).join(' ')}`;
+    const rawText = reconstructResumeText(currentContent);
 
     const analysis = await providers.ai.analyzeResume(
       currentContent,
@@ -402,9 +458,10 @@ router.post('/analyze-raw', authenticateToken, async (req: AuthenticatedRequest,
     }
 
     const dataObj = resumeData || { summary: rawText, skills: [], experience: [], education: [] };
+    const text = rawText || reconstructResumeText(dataObj);
     const analysis = await providers.ai.analyzeResume(
       dataObj,
-      rawText || "",
+      text || "",
       targetJobDescription || ""
     );
 

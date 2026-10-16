@@ -5,6 +5,32 @@ import Link from 'next/link';
 import { Target, CheckCircle2, AlertTriangle, Lightbulb, Sparkles, FileText, Info, HelpCircle, ShieldCheck, Layers, Award, BookOpen, Clock, Send } from 'lucide-react';
 import { api } from '@/lib/api';
 
+function formatResumeForAnalysis(p: any): string {
+  if (!p) return '';
+  if (p.raw_text && typeof p.raw_text === 'string' && p.raw_text.trim()) {
+    return p.raw_text.trim();
+  }
+  const parts: string[] = [];
+  if (p.personal_info?.full_name) parts.push(p.personal_info.full_name);
+  if (p.personal_info?.email) parts.push(p.personal_info.email);
+  if (p.personal_info?.phone) parts.push(p.personal_info.phone);
+  if (p.summary) parts.push(`Summary: ${p.summary}`);
+  if (Array.isArray(p.skills) && p.skills.length > 0) parts.push(`Skills: ${p.skills.join(', ')}`);
+  if (Array.isArray(p.experience) && p.experience.length > 0) {
+    const exps = p.experience.map((e: any) => `${e.role || ''} ${e.company ? `@ ${e.company}` : ''} ${e.duration || ''}\n${e.description || ''}`).join('\n\n');
+    parts.push(`Experience:\n${exps}`);
+  }
+  if (Array.isArray(p.education) && p.education.length > 0) {
+    const edus = p.education.map((ed: any) => `${ed.degree || ''} ${ed.institution || ''} ${ed.year || ''}`).join('\n');
+    parts.push(`Education:\n${edus}`);
+  }
+  if (Array.isArray(p.projects) && p.projects.length > 0) {
+    const projs = p.projects.map((pr: any) => `${pr.title || pr.name || ''}: ${pr.description || ''}`).join('\n');
+    parts.push(`Projects:\n${projs}`);
+  }
+  return parts.join('\n\n');
+}
+
 export default function ATSAnalyzerPage() {
   const [resumes, setResumes] = useState<any[]>([]);
   const [selectedResumeId, setSelectedResumeId] = useState<string>('');
@@ -30,9 +56,7 @@ export default function ATSAnalyzerPage() {
       if (list.length > 0) {
         setSelectedResumeId(String(list[0].id));
         if (list[0].parsedContent) {
-          const p = list[0].parsedContent;
-          const text = p.raw_text || `${p.summary || ''} ${(p.skills || []).join(' ')} ${JSON.stringify(p.experience || [])}`;
-          setResumeText(text.trim());
+          setResumeText(formatResumeForAnalysis(list[0].parsedContent));
         }
       }
     } catch (err) {
@@ -45,9 +69,7 @@ export default function ATSAnalyzerPage() {
     if (!idStr) return;
     const found = resumes.find(r => r.id === Number(idStr));
     if (found && found.parsedContent) {
-      const p = found.parsedContent;
-      const text = p.raw_text || `${p.summary || ''} ${(p.skills || []).join(' ')} ${JSON.stringify(p.experience || [])}`;
-      setResumeText(text.trim());
+      setResumeText(formatResumeForAnalysis(found.parsedContent));
     }
   };
 

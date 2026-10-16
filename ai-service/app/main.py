@@ -77,8 +77,13 @@ async def parse_resume_endpoint(file: UploadFile = File(...)):
     else:
         raw_text = contents.decode("utf-8", errors="ignore")
         
-    if not raw_text or raw_text.startswith("PDF Parse Error") or raw_text.startswith("DOCX Parse Error"):
-        raise HTTPException(status_code=400, detail="Failed to parse resume file. Ensure the file is unencrypted and text-readable.")
+    if not raw_text or raw_text.startswith("PDF_SCANNED_OR_EMPTY") or raw_text.startswith("DOCX_EMPTY"):
+        raise HTTPException(
+            status_code=400,
+            detail="This document appears to be a scanned image or contains no selectable text. JobGateway currently requires text-based PDF or DOCX files (optical character recognition / OCR for scanned images is not yet supported). Please upload a text-selectable PDF or DOCX version, or paste your resume text."
+        )
+    if raw_text.startswith("PDF Parse Error") or raw_text.startswith("DOCX Parse Error"):
+        raise HTTPException(status_code=400, detail=f"Failed to parse resume file: {raw_text}. Ensure the file is unencrypted and text-readable.")
 
     structured_data = extract_structured_resume(raw_text)
     return {

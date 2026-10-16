@@ -3,6 +3,8 @@ import { prisma } from '../db';
 import { authenticateToken, AuthenticatedRequest } from '../middleware/auth';
 import { providers } from '../providers';
 
+import { reconstructResumeText } from './resume.routes';
+
 const router = Router();
 
 // POST /api/ats/analyze
@@ -35,11 +37,7 @@ router.post('/analyze', authenticateToken, async (req: AuthenticatedRequest, res
       if (resume.parsedContent) {
         try {
           parsedResumeObj = JSON.parse(resume.parsedContent);
-          if (parsedResumeObj.raw_text) {
-            textToAnalyze = parsedResumeObj.raw_text;
-          } else {
-            textToAnalyze = `${parsedResumeObj.summary || ''} ${Array.isArray(parsedResumeObj.skills) ? parsedResumeObj.skills.join(' ') : ''} ${JSON.stringify(parsedResumeObj.experience || [])}`;
-          }
+          textToAnalyze = reconstructResumeText(parsedResumeObj);
         } catch (e) {
           console.warn('[ATS ROUTE] Error parsing stored resume JSON:', e);
         }

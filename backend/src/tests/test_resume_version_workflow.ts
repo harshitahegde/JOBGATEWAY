@@ -142,7 +142,7 @@ async function runResumeVersionAuditTests() {
     assert(optContent.personal_info?.full_name === 'Harshita Hegde', 'Preserved personal_info.full_name');
     assert(optContent.personal_info?.email === 'harshita@example.com', 'Preserved personal_info.email');
     assert(optContent.personal_info?.linkedin_url === 'https://linkedin.com/in/harshita-hegde', 'Preserved contact links');
-    assert(optContent.summary.includes('Targeted Senior Full Stack Engineer professional'), 'Optimized summary role alignment');
+    assert(optContent.summary === originalResumeFacts.summary, 'Preserved authentic summary without fabricating replacement');
     assert(optContent.skills.includes('TypeScript') && optContent.skills.includes('React'), 'Maintained genuine skills');
     assert(!optContent.skills.includes('GraphQL'), 'Missing JD keyword GraphQL was NOT hallucinated into candidate skills');
     assert(Array.isArray(optimizeRes.data.missingKeywords) && optimizeRes.data.missingKeywords.includes('GraphQL'), 'Reported GraphQL in missing keywords');

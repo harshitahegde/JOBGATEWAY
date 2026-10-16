@@ -50,6 +50,7 @@ const SYNONYM_MAP: Record<string, string> = {
   "py": "Python", "python": "Python",
   "go": "Go", "golang": "Go",
   "java": "Java",
+  "c": "C",
   "c#": "C#", "csharp": "C#",
   "c++": "C++", "cpp": "C++",
   "html": "HTML", "html5": "HTML",
@@ -116,7 +117,7 @@ export function parseJDSections(jobDescription: string): { reqSkills: string[]; 
     if (["required skills", "requirements", "qualifications", "must have", "what you need", "basic qualifications", "who you are"].some(h => lLower.includes(h))) {
       currentMode = 'req';
       continue;
-    } else if (["preferred skills", "preferred qualifications", "nice to have", "pluses", "desirable", "bonus points", "additional skills"].some(h => lLower.includes(h))) {
+    } else if (["preferred skills", "preferred qualifications", "preferred", "nice to have", "pluses", "desirable", "bonus points", "additional skills"].some(h => lLower.includes(h))) {
       currentMode = 'pref';
       continue;
     }

@@ -55,6 +55,7 @@ const SYNONYM_MAP = {
     "py": "Python", "python": "Python",
     "go": "Go", "golang": "Go",
     "java": "Java",
+    "c": "C",
     "c#": "C#", "csharp": "C#",
     "c++": "C++", "cpp": "C++",
     "html": "HTML", "html5": "HTML",
@@ -120,7 +121,7 @@ function parseJDSections(jobDescription) {
             currentMode = 'req';
             continue;
         }
-        else if (["preferred skills", "preferred qualifications", "nice to have", "pluses", "desirable", "bonus points", "additional skills"].some(h => lLower.includes(h))) {
+        else if (["preferred skills", "preferred qualifications", "preferred", "nice to have", "pluses", "desirable", "bonus points", "additional skills"].some(h => lLower.includes(h))) {
             currentMode = 'pref';
             continue;
         }
