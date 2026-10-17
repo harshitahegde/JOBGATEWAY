@@ -171,10 +171,14 @@ export class RealOrMockAIProvider implements AIProvider {
   }
 }
 
+import { createVideoStorageProvider, VideoStorageProvider } from './storage_provider';
+export { VideoStorageProvider } from './storage_provider';
+
 // 5. Provider Export Registry
 export const providers = {
   job: new UnconfiguredJobProvider(),
   emailFinder: new UnconfiguredEmailFinderProvider(),
   emailSender: createEmailProvider(),
-  ai: new RealOrMockAIProvider()
+  ai: new RealOrMockAIProvider(),
+  videoStorage: createVideoStorageProvider()
 };

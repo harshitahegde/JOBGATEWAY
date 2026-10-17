@@ -3,6 +3,15 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.KNOWN_PLATFORMS = void 0;
+exports.unescapePdfString = unescapePdfString;
+exports.normalizeUrl = normalizeUrl;
+exports.detectPlatformFromUrl = detectPlatformFromUrl;
+exports.extractPdfLinksFromBuffer = extractPdfLinksFromBuffer;
+exports.extractZipEntries = extractZipEntries;
+exports.extractDocxLinksFromBuffer = extractDocxLinksFromBuffer;
+exports.extractTextUrls = extractTextUrls;
+exports.extractProfileLinks = extractProfileLinks;
 exports.extractPhoneNumber = extractPhoneNumber;
 exports.extractEmail = extractEmail;
 exports.extractLinkedIn = extractLinkedIn;
@@ -12,7 +21,383 @@ exports.extractStructuredResumeTS = extractStructuredResumeTS;
 exports.parseResumeFileTS = parseResumeFileTS;
 const fs_1 = __importDefault(require("fs"));
 const path_1 = __importDefault(require("path"));
+const zlib_1 = __importDefault(require("zlib"));
 const ats_engine_1 = require("./ats_engine");
+exports.KNOWN_PLATFORMS = ['LinkedIn', 'GitHub', 'LeetCode', 'Codeforces', 'HackerRank', 'CodeChef', 'Kaggle', 'GitLab', 'Portfolio'];
+/**
+ * Unescapes PDF literal strings including octal escape sequences (\ooo) and standard escapes.
+ */
+function unescapePdfString(str) {
+    let decoded = str.replace(/\\([0-7]{1,3})/g, (_, oct) => {
+        return String.fromCharCode(parseInt(oct, 8));
+    });
+    decoded = decoded
+        .replace(/\\n/g, '\n')
+        .replace(/\\r/g, '\r')
+        .replace(/\\t/g, '\t')
+        .replace(/\\b/g, '\b')
+        .replace(/\\f/g, '\f')
+        .replace(/\\\(/g, '(')
+        .replace(/\\\)/g, ')')
+        .replace(/\\\\/g, '\\');
+    return decoded.trim();
+}
+/**
+ * Normalizes and validates URLs extracted from resume files or text.
+ */
+function normalizeUrl(rawUrl) {
+    if (!rawUrl || typeof rawUrl !== 'string')
+        return null;
+    let clean = rawUrl.trim();
+    // Strip leading/trailing quotes, angle brackets, parentheses, spaces
+    clean = clean.replace(/^[<"'\(\[\{\s]+|[>"'\)\]\}\s.,;:]+$/g, '');
+    // Strip mailto:
+    if (clean.toLowerCase().startsWith('mailto:')) {
+        return null;
+    }
+    // Prepend protocol if missing
+    if (/^(?:www\.|[a-zA-Z0-9-]+\.(?:com|org|net|io|dev|me|ai|co|cn|in|app|tech|site|online)\b)/i.test(clean)) {
+        clean = `https://${clean}`;
+    }
+    try {
+        const parsed = new URL(clean);
+        if (!['http:', 'https:'].includes(parsed.protocol)) {
+            return null;
+        }
+        // Hostname must contain at least one dot or be localhost
+        if (!parsed.hostname.includes('.') && parsed.hostname !== 'localhost') {
+            return null;
+        }
+        // Return normalized canonical URL with trailing slashes stripped
+        const cleanPath = parsed.pathname.replace(/\/+$/, '');
+        let result = parsed.origin + cleanPath;
+        if (parsed.search)
+            result += parsed.search;
+        return result;
+    }
+    catch {
+        return null;
+    }
+}
+/**
+ * Detects platform based on actual destination URL hostname and path.
+ * Rule: Platform detection MUST be driven by URL, not just anchor text!
+ */
+function detectPlatformFromUrl(url, anchorText) {
+    let hostname = '';
+    let pathname = '';
+    try {
+        const parsed = new URL(url);
+        hostname = parsed.hostname.toLowerCase();
+        pathname = parsed.pathname;
+    }
+    catch {
+        const match = url.match(/^(?:https?:\/\/)?([^\/]+)(\/.*)?$/i);
+        if (match) {
+            hostname = (match[1] || '').toLowerCase();
+            pathname = match[2] || '';
+        }
+    }
+    const cleanAnchor = (anchorText || '').trim();
+    // 1. LeetCode
+    if (hostname.includes('leetcode.com') || hostname.includes('leetcode.cn')) {
+        return { platform: 'LeetCode', label: cleanAnchor || 'LeetCode' };
+    }
+    // 2. LinkedIn
+    if (hostname.includes('linkedin.com')) {
+        return { platform: 'LinkedIn', label: cleanAnchor || 'LinkedIn' };
+    }
+    // 3. GitHub
+    if (hostname.includes('github.com')) {
+        const cleanPath = pathname.replace(/^\/+|\/+$/g, '').toLowerCase();
+        const reserved = ['pricing', 'features', 'enterprise', 'explore', 'contact', 'about', 'topics', 'trending', 'collections'];
+        if (!reserved.includes(cleanPath)) {
+            return { platform: 'GitHub', label: cleanAnchor || 'GitHub' };
+        }
+    }
+    // 4. GitLab
+    if (hostname.includes('gitlab.com')) {
+        return { platform: 'GitLab', label: cleanAnchor || 'GitLab' };
+    }
+    // 5. Codeforces
+    if (hostname.includes('codeforces.com')) {
+        return { platform: 'Codeforces', label: cleanAnchor || 'Codeforces' };
+    }
+    // 6. HackerRank
+    if (hostname.includes('hackerrank.com')) {
+        return { platform: 'HackerRank', label: cleanAnchor || 'HackerRank' };
+    }
+    // 7. CodeChef
+    if (hostname.includes('codechef.com')) {
+        return { platform: 'CodeChef', label: cleanAnchor || 'CodeChef' };
+    }
+    // 8. Kaggle
+    if (hostname.includes('kaggle.com')) {
+        return { platform: 'Kaggle', label: cleanAnchor || 'Kaggle' };
+    }
+    // 9. Portfolio / Personal Website
+    const isPortfolioHost = (hostname.includes('github.io') ||
+        hostname.includes('gitlab.io') ||
+        hostname.includes('vercel.app') ||
+        hostname.includes('netlify.app') ||
+        hostname.includes('pages.dev') ||
+        hostname.endsWith('.dev') ||
+        hostname.endsWith('.me') ||
+        hostname.endsWith('.site') ||
+        hostname.endsWith('.design') ||
+        hostname.includes('portfolio') ||
+        /portfolio|personal\s*site|personal\s*website/i.test(cleanAnchor));
+    if (isPortfolioHost) {
+        return { platform: 'Portfolio', label: cleanAnchor || 'Portfolio' };
+    }
+    // 10. Other / Unrecognized destination URL
+    return {
+        platform: 'Other',
+        label: cleanAnchor || hostname || 'Web Link'
+    };
+}
+/**
+ * Extracts links embedded in PDF annotations (both uncompressed objects and raw streams).
+ */
+function extractPdfLinksFromBuffer(buffer) {
+    const links = [];
+    const seenUrls = new Set();
+    const pdfStr = buffer.toString('latin1');
+    // Pattern 1: Literal URI string /URI (http...) or /URI (https...)
+    const uriRegex = /\/URI\s*(?:\(([^)\r\n]+)\)|<([0-9a-fA-F]+)>)/g;
+    let match;
+    while ((match = uriRegex.exec(pdfStr)) !== null) {
+        let rawUrl = '';
+        if (match[1]) {
+            rawUrl = unescapePdfString(match[1]);
+        }
+        else if (match[2]) {
+            try {
+                rawUrl = Buffer.from(match[2], 'hex').toString('utf-8');
+            }
+            catch { }
+        }
+        const normalized = normalizeUrl(rawUrl);
+        if (normalized && !seenUrls.has(normalized.toLowerCase())) {
+            seenUrls.add(normalized.toLowerCase());
+            links.push({ url: normalized, source: 'annotation' });
+        }
+    }
+    // Pattern 2: Inspect decompressed FlateDecode streams for embedded /URI
+    const streamRegex = /stream\r?\n([\s\S]*?)\r?\nendstream/g;
+    let streamMatch;
+    while ((streamMatch = streamRegex.exec(pdfStr)) !== null) {
+        try {
+            const streamBytes = Buffer.from(streamMatch[1], 'latin1');
+            let inflated = null;
+            try {
+                inflated = zlib_1.default.inflateSync(streamBytes);
+            }
+            catch {
+                try {
+                    inflated = zlib_1.default.inflateRawSync(streamBytes);
+                }
+                catch { }
+            }
+            if (inflated) {
+                const decompressed = inflated.toString('latin1');
+                let streamUriMatch;
+                while ((streamUriMatch = uriRegex.exec(decompressed)) !== null) {
+                    let sUrl = streamUriMatch[1] ? unescapePdfString(streamUriMatch[1]) : '';
+                    const norm = normalizeUrl(sUrl);
+                    if (norm && !seenUrls.has(norm.toLowerCase())) {
+                        seenUrls.add(norm.toLowerCase());
+                        links.push({ url: norm, source: 'annotation' });
+                    }
+                }
+            }
+        }
+        catch { }
+    }
+    return links;
+}
+/**
+ * Extracts ZIP entries from DOCX buffer in pure Node.js using standard zlib.
+ */
+function extractZipEntries(buffer) {
+    const entries = new Map();
+    let offset = 0;
+    while (offset < buffer.length - 30) {
+        // Check local file header signature 0x04034b50 ('PK\x03\x04')
+        if (buffer.readUInt32LE(offset) !== 0x04034b50) {
+            offset++;
+            continue;
+        }
+        const compressionMethod = buffer.readUInt16LE(offset + 8);
+        const compressedSize = buffer.readUInt32LE(offset + 18);
+        const uncompressedSize = buffer.readUInt32LE(offset + 22);
+        const fileNameLength = buffer.readUInt16LE(offset + 26);
+        const extraFieldLength = buffer.readUInt16LE(offset + 28);
+        const fileNameStart = offset + 30;
+        const fileNameEnd = fileNameStart + fileNameLength;
+        if (fileNameEnd > buffer.length)
+            break;
+        const fileName = buffer.toString('utf-8', fileNameStart, fileNameEnd);
+        const dataStart = fileNameEnd + extraFieldLength;
+        const dataEnd = dataStart + compressedSize;
+        if (dataEnd <= buffer.length) {
+            try {
+                const compressedData = buffer.slice(dataStart, dataEnd);
+                let uncompressedData;
+                if (compressionMethod === 0) {
+                    uncompressedData = compressedData;
+                }
+                else if (compressionMethod === 8) {
+                    uncompressedData = zlib_1.default.inflateRawSync(compressedData);
+                }
+                else {
+                    uncompressedData = Buffer.alloc(0);
+                }
+                if (uncompressedData.length > 0) {
+                    entries.set(fileName, uncompressedData.toString('utf-8'));
+                }
+            }
+            catch { }
+        }
+        offset = dataEnd;
+    }
+    return entries;
+}
+/**
+ * Extracts hyperlinks and visible anchor texts from DOCX relationships and document XML.
+ */
+function extractDocxLinksFromBuffer(buffer) {
+    const links = [];
+    const entries = extractZipEntries(buffer);
+    const relsContent = entries.get('word/_rels/document.xml.rels') || '';
+    const docXmlContent = entries.get('word/document.xml') || '';
+    // 1. Map r:id -> Target URL from document.xml.rels
+    const relMap = new Map();
+    const relRegex = /<Relationship\b[^>]*\bId=["']([^"']+)["'][^>]*\bType=["'][^"']*hyperlink["'][^>]*\bTarget=["']([^"']+)["'][^>]*\bTargetMode=["']External["']/gi;
+    let rMatch;
+    while ((rMatch = relRegex.exec(relsContent)) !== null) {
+        const id = rMatch[1];
+        const target = rMatch[2];
+        relMap.set(id, target);
+    }
+    // Also match Target before Type order variation
+    const relRegex2 = /<Relationship\b[^>]*\bTarget=["']([^"']+)["'][^>]*\bId=["']([^"']+)["'][^>]*\bType=["'][^"']*hyperlink["']/gi;
+    while ((rMatch = relRegex2.exec(relsContent)) !== null) {
+        const target = rMatch[1];
+        const id = rMatch[2];
+        relMap.set(id, target);
+    }
+    // 2. Map r:id -> Visible text from word/document.xml
+    const anchorMap = new Map();
+    const linkRegex = /<w:hyperlink\b[^>]*\br:id=["']([^"']+)["'][^>]*>([\s\S]*?)<\/w:hyperlink>/gi;
+    let lMatch;
+    while ((lMatch = linkRegex.exec(docXmlContent)) !== null) {
+        const id = lMatch[1];
+        const innerXml = lMatch[2];
+        // Extract text from <w:t> tags
+        const textMatches = innerXml.match(/<w:t\b[^>]*>([^<]*)<\/w:t>/gi) || [];
+        const visibleText = textMatches.map(t => t.replace(/<[^>]+>/g, '')).join('').trim();
+        if (visibleText) {
+            anchorMap.set(id, visibleText);
+        }
+    }
+    // 3. Assemble verified external hyperlinks
+    const seenUrls = new Set();
+    for (const [id, targetUrl] of relMap.entries()) {
+        const normalized = normalizeUrl(targetUrl);
+        if (normalized && !seenUrls.has(normalized.toLowerCase())) {
+            seenUrls.add(normalized.toLowerCase());
+            const label = anchorMap.get(id) || '';
+            links.push({
+                url: normalized,
+                label: label || undefined,
+                source: 'docx_rel'
+            });
+        }
+    }
+    return links;
+}
+/**
+ * Extracts visible web URLs written directly in resume text.
+ */
+function extractTextUrls(text) {
+    const links = [];
+    if (!text)
+        return links;
+    const urlRegex = /(?:https?:\/\/|www\.)[a-zA-Z0-9-._~:/?#\[\]@!$&'()*+,;=%]+/gi;
+    const matches = text.match(urlRegex) || [];
+    const seen = new Set();
+    for (const raw of matches) {
+        const normalized = normalizeUrl(raw);
+        if (normalized && !seen.has(normalized.toLowerCase())) {
+            seen.add(normalized.toLowerCase());
+            links.push({
+                url: normalized,
+                source: 'text_match'
+            });
+        }
+    }
+    return links;
+}
+/**
+ * Merges embedded link annotations and visible text URLs.
+ * Deduplicates destination URLs and classifies platforms.
+ * Strictly NEVER invents a profile URL when only the platform name is mentioned!
+ */
+function extractProfileLinks(embeddedLinks, rawText) {
+    const visibleLinks = extractTextUrls(rawText);
+    // Combine and deduplicate
+    const linkMap = new Map();
+    // 1. Process embedded annotations first (they often carry explicit anchor text)
+    for (const item of embeddedLinks) {
+        const norm = normalizeUrl(item.url);
+        if (!norm)
+            continue;
+        const key = norm.toLowerCase();
+        if (!linkMap.has(key)) {
+            const { platform, label } = detectPlatformFromUrl(norm, item.label);
+            linkMap.set(key, {
+                platform,
+                url: norm,
+                label,
+                source: item.source
+            });
+        }
+    }
+    // 2. Process visible text matches (deduplicating against existing)
+    for (const item of visibleLinks) {
+        const norm = normalizeUrl(item.url);
+        if (!norm)
+            continue;
+        const key = norm.toLowerCase();
+        if (!linkMap.has(key)) {
+            const { platform, label } = detectPlatformFromUrl(norm, item.label);
+            linkMap.set(key, {
+                platform,
+                url: norm,
+                label,
+                source: 'text_match'
+            });
+        }
+    }
+    const profileLinks = Array.from(linkMap.values());
+    // Determine detected platforms
+    const detectedPlatformsSet = new Set();
+    for (const link of profileLinks) {
+        if (link.platform !== 'Other') {
+            detectedPlatformsSet.add(link.platform);
+        }
+    }
+    const platformsDetected = Array.from(detectedPlatformsSet);
+    // Determine missing platforms from standard checklist
+    const standardPlatforms = ['LinkedIn', 'GitHub', 'LeetCode'];
+    const platformsMissing = standardPlatforms.filter(p => !detectedPlatformsSet.has(p));
+    return {
+        profileLinks,
+        platformsDetected,
+        platformsMissing
+    };
+}
 function extractPhoneNumber(text) {
     const phoneCandidates = text.match(/(?:(?:\+|00)\d{1,3}[-.\s]*)?(?:\(?\d{2,5}\)?[-.\s]*)?\d{3,5}[-.\s]*\d{3,5}(?:[-.\s]*\d{1,4})?/g) || [];
     for (const cand of phoneCandidates) {
@@ -76,10 +461,19 @@ function extractSkillsFromSection(sectionLines) {
     }
     return skills;
 }
-function extractStructuredResumeTS(rawText) {
+function extractStructuredResumeTS(rawText, embeddedLinks = []) {
+    const { profileLinks, platformsDetected, platformsMissing } = extractProfileLinks(embeddedLinks, rawText);
     if (!rawText || !rawText.trim()) {
         return {
-            personal_info: { full_name: '', email: '', phone: '', location: '', linkedin_url: '', github_url: '' },
+            personal_info: {
+                full_name: '',
+                email: '',
+                phone: '',
+                location: '',
+                linkedin_url: '',
+                github_url: '',
+                profile_links: profileLinks
+            },
             summary: '',
             skills: [],
             education: [],
@@ -92,14 +486,21 @@ function extractStructuredResumeTS(rawText) {
                 word_count: 0,
                 is_empty: true,
                 fields_detected: [],
-                fields_absent: ['full_name', 'email', 'phone', 'skills', 'experience', 'education']
+                fields_absent: ['full_name', 'email', 'phone', 'skills', 'experience', 'education'],
+                profile_links_count: profileLinks.length,
+                platforms_detected: platformsDetected,
+                platforms_missing: platformsMissing,
+                link_extraction_status: profileLinks.length > 0 ? 'SUCCESS' : 'NO_LINKS_FOUND'
             }
         };
     }
     const email = extractEmail(rawText);
     const phone = extractPhoneNumber(rawText);
-    const linkedin_url = extractLinkedIn(rawText);
-    const github_url = extractGitHub(rawText);
+    // Derive linkedin and github from structured profile links first, then text fallback
+    const linkedInObj = profileLinks.find(l => l.platform === 'LinkedIn');
+    const gitHubObj = profileLinks.find(l => l.platform === 'GitHub');
+    const linkedin_url = linkedInObj ? linkedInObj.url : extractLinkedIn(rawText);
+    const github_url = gitHubObj ? gitHubObj.url : extractGitHub(rawText);
     const lines = rawText.split('\n').map(l => l.trim()).filter(Boolean);
     let name = '';
     for (const line of lines.slice(0, 6)) {
@@ -157,14 +558,14 @@ function extractStructuredResumeTS(rawText) {
         achievements: []
     };
     for (const line of lines) {
-        const normLine = line
+        const norm = line
             .replace(/^[#*\-•\d.]+\s*/, '')
             .replace(/^[:\-]+|[:\-]+$/g, '')
             .trim()
             .toLowerCase();
         let matchedSection = null;
         for (const [sec, synonyms] of Object.entries(SECTION_SYNONYMS)) {
-            if (synonyms.includes(normLine)) {
+            if (synonyms.includes(norm)) {
                 matchedSection = sec;
                 break;
             }
@@ -176,7 +577,6 @@ function extractStructuredResumeTS(rawText) {
             sections[currentSection].push(line);
         }
     }
-    // Summary
     let summaryText = sections.summary.join(' ').trim();
     if (!summaryText && sections.header.length > 0) {
         const headerBody = sections.header.filter(l => l !== name && !l.includes('@') && !l.includes('github.com') && !l.includes('linkedin.com') && l.length > 20);
@@ -184,16 +584,15 @@ function extractStructuredResumeTS(rawText) {
             summaryText = headerBody.slice(0, 2).join(' ').trim();
         }
     }
-    // Skills
     const candidateSkills = extractSkillsFromSection(sections.skills);
     const knownTech = (0, ats_engine_1.extractTechKeywords)(rawText);
     const allSkills = [];
     const seenSkills = new Set();
     for (const s of candidateSkills) {
-        const sClean = s.trim();
-        if (!seenSkills.has(sClean.toLowerCase())) {
-            seenSkills.add(sClean.toLowerCase());
-            allSkills.push(sClean);
+        const clean = s.trim();
+        if (!seenSkills.has(clean.toLowerCase())) {
+            seenSkills.add(clean.toLowerCase());
+            allSkills.push(clean);
         }
     }
     for (const s of knownTech) {
@@ -202,18 +601,17 @@ function extractStructuredResumeTS(rawText) {
             allSkills.push(s);
         }
     }
-    // Education
     const educationList = [];
     if (sections.education.length > 0) {
         let currEdu = null;
-        const degreeKeywords = [
+        const degreeKws = [
             'bachelor', 'master', 'phd', 'doctorate', 'b.s.', 'b.a.', 'm.s.', 'm.a.',
             'b.tech', 'm.tech', 'degree', 'diploma', 'associate', 'bba', 'mba', 'b.c.a.', 'm.c.a.'
         ];
         for (const l of sections.education) {
-            const lLower = l.toLowerCase();
+            const lLow = l.toLowerCase();
             const yearMatch = l.match(/\b(20\d{2}|19\d{2})\b/);
-            const isDegreeLine = degreeKeywords.some(dk => lLower.includes(dk));
+            const isDegreeLine = degreeKws.some(dk => lLow.includes(dk));
             if (isDegreeLine || !currEdu) {
                 if (currEdu)
                     educationList.push(currEdu);
@@ -234,7 +632,6 @@ function extractStructuredResumeTS(rawText) {
         if (currEdu)
             educationList.push(currEdu);
     }
-    // Experience
     const experienceList = [];
     if (sections.experience.length > 0) {
         let currExp = null;
@@ -246,7 +643,7 @@ function extractStructuredResumeTS(rawText) {
                 currExp = {
                     role: l.split('|')[0].trim(),
                     company: l.includes('|') ? l.split('|')[1].trim() : '',
-                    duration: hasDate && !l.includes('|') ? l : '',
+                    duration: hasDate && !l.includes('|') ? l.trim() : '',
                     description: ''
                 };
             }
@@ -265,14 +662,13 @@ function extractStructuredResumeTS(rawText) {
             else {
                 const descLine = l.replace(/^[-*• \t]+/, '').trim();
                 if (descLine) {
-                    currExp.description += currExp.description ? '\n' + descLine : descLine;
+                    currExp.description = currExp.description ? `${currExp.description}\n${descLine}` : descLine;
                 }
             }
         }
         if (currExp)
             experienceList.push(currExp);
     }
-    // Projects
     const projectsList = [];
     if (sections.projects.length > 0) {
         let currProj = null;
@@ -286,7 +682,7 @@ function extractStructuredResumeTS(rawText) {
             else {
                 const descLine = l.replace(/^[-*• ]+/, '').trim();
                 if (descLine) {
-                    currProj.description += currProj.description ? ' ' + descLine : descLine;
+                    currProj.description = currProj.description ? `${currProj.description} ${descLine}` : descLine;
                 }
             }
         }
@@ -299,7 +695,6 @@ function extractStructuredResumeTS(rawText) {
     const achievements = sections.achievements
         .map(l => l.replace(/^[-*• ]+/, '').trim())
         .filter(l => l.length > 2);
-    // Location heuristic
     let location = '';
     for (const hl of sections.header) {
         if ([', CA', ', NY', ', TX', ', WA', ', FL', 'Remote', 'USA', 'United States', 'San Francisco', 'New York'].some(s => hl.includes(s))) {
@@ -345,7 +740,8 @@ function extractStructuredResumeTS(rawText) {
             phone,
             location,
             linkedin_url,
-            github_url
+            github_url,
+            profile_links: profileLinks
         },
         summary: summaryText,
         skills: allSkills,
@@ -359,7 +755,11 @@ function extractStructuredResumeTS(rawText) {
             word_count: words.length,
             is_empty: false,
             fields_detected: fieldsDetected,
-            fields_absent: fieldsAbsent
+            fields_absent: fieldsAbsent,
+            profile_links_count: profileLinks.length,
+            platforms_detected: platformsDetected,
+            platforms_missing: platformsMissing,
+            link_extraction_status: profileLinks.length > 0 ? 'SUCCESS' : 'NO_LINKS_FOUND'
         }
     };
 }
@@ -367,19 +767,33 @@ async function parseResumeFileTS(filePath) {
     const filename = path_1.default.basename(filePath);
     const ext = path_1.default.extname(filePath).toLowerCase();
     let rawText = '';
+    let embeddedLinks = [];
     if (ext === '.pdf') {
-        const pdfParse = require('pdf-parse');
         const dataBuffer = fs_1.default.readFileSync(filePath);
-        const pdfData = await pdfParse(dataBuffer);
-        rawText = (pdfData.text || '').trim();
+        // 1. Extract link annotations from PDF buffer
+        embeddedLinks = extractPdfLinksFromBuffer(dataBuffer);
+        // 2. Extract plain text via pdf-parse
+        try {
+            const pdfParse = require('pdf-parse');
+            const pdfData = await pdfParse(dataBuffer);
+            rawText = (pdfData.text || '').trim();
+        }
+        catch (e) {
+            // Fallback clean text extract from uncompressed stream text objects
+            const str = dataBuffer.toString('latin1');
+            const textMatches = str.match(/\(([^)\\]{2,})\)\s*Tj/g) || [];
+            rawText = textMatches.map(m => m.replace(/^\(|\)\s*Tj$/g, '')).join(' ');
+        }
     }
     else if (ext === '.docx') {
-        // DOCX extraction: DOCX is a zip file with word/document.xml
-        try {
-            const dataBuffer = fs_1.default.readFileSync(filePath);
-            // Fallback clean extraction of text xml nodes
-            const str = dataBuffer.toString('utf-8');
-            const textMatches = str.match(/<w:t[^>]*>([^<]+)<\/w:t>/g);
+        const dataBuffer = fs_1.default.readFileSync(filePath);
+        // 1. Extract relationships and hyperlink XML from DOCX ZIP entries
+        embeddedLinks = extractDocxLinksFromBuffer(dataBuffer);
+        // 2. Extract plain text from paragraphs and tables
+        const entries = extractZipEntries(dataBuffer);
+        const docXml = entries.get('word/document.xml') || '';
+        if (docXml) {
+            const textMatches = docXml.match(/<w:t\b[^>]*>([^<]+)<\/w:t>/g);
             if (textMatches) {
                 rawText = textMatches
                     .map(m => m.replace(/<[^>]+>/g, ''))
@@ -387,9 +801,6 @@ async function parseResumeFileTS(filePath) {
                     .replace(/\s+/g, ' ')
                     .trim();
             }
-        }
-        catch (e) {
-            rawText = '';
         }
     }
     else {
@@ -403,7 +814,7 @@ async function parseResumeFileTS(filePath) {
             message: 'This document appears to be a scanned image or contains no selectable text. JobGateway currently requires text-based PDF or DOCX files (optical character recognition / OCR for scanned images is not yet supported). Please upload a text-selectable PDF or DOCX version, or paste your resume text.'
         };
     }
-    const structuredData = extractStructuredResumeTS(rawText);
+    const structuredData = extractStructuredResumeTS(rawText, embeddedLinks);
     return {
         filename,
         raw_text: rawText,

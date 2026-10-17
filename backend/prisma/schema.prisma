@@ -22,6 +22,7 @@ model User {
   applications  Application[]
   outreachEmails OutreachEmail[]
   videos        Video[]
+  videoAttachments ResumeVideoAttachment[]
   notifications Notification[]
 }
 
@@ -35,6 +36,7 @@ model Profile {
   linkedinUrl       String?
   githubUrl         String?
   portfolioUrl      String?
+  leetcodeUrl       String?
   careerPreferences String?  // Stored as JSON string
   education         String?  // Stored as JSON string
   experience        String?  // Stored as JSON string
@@ -59,6 +61,7 @@ model Resume {
   user             User            @relation(fields: [userId], references: [id], onDelete: Cascade)
   versions         ResumeVersion[]
   analyses         ResumeAnalysis[]
+  videoAttachments ResumeVideoAttachment[]
 }
 
 model ResumeVersion {
@@ -73,6 +76,7 @@ model ResumeVersion {
   resume         Resume       @relation(fields: [resumeId], references: [id], onDelete: Cascade)
   user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   applications   Application[]
+  videoAttachments ResumeVideoAttachment[]
 }
 
 model ResumeAnalysis {
@@ -208,11 +212,35 @@ model Video {
   id              Int      @id @default(autoincrement())
   userId          Int
   title           String
+  description     String?
   filePath        String
   durationSeconds Int      @default(0)
   fileSize        Int      @default(0)
+  mimeType        String?  @default("video/webm")
+  storageProvider String   @default("local_disk")
+  cloudAssetId    String?  // Cloudinary public_id / persistent asset ID
+  shareUrl        String?
   createdAt       DateTime @default(now())
   user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  attachments     ResumeVideoAttachment[]
+}
+
+model ResumeVideoAttachment {
+  id              Int            @id @default(autoincrement())
+  userId          Int
+  videoId         Int
+  resumeId        Int?
+  resumeVersionId Int?
+  notes           String?
+  createdAt       DateTime       @default(now())
+  user            User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  video           Video          @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  resume          Resume?        @relation(fields: [resumeId], references: [id], onDelete: Cascade)
+  resumeVersion   ResumeVersion? @relation(fields: [resumeVersionId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([resumeId])
+  @@index([resumeVersionId])
 }
 
 model Notification {

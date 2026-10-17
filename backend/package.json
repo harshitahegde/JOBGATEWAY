@@ -4,9 +4,13 @@
   "description": "JobGateway Smart Job Application System Express Backend",
   "main": "dist/index.js",
   "scripts": {
-    "build": "tsc",
+    "build": "node scripts/setup_database.js && tsc",
     "start": "node dist/index.js",
     "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
+    "db:setup": "node scripts/setup_database.js",
+    "db:export-sqlite": "ts-node scripts/migrate_sqlite_to_postgres.ts --export",
+    "db:import-postgres": "ts-node scripts/migrate_sqlite_to_postgres.ts --import",
+    "db:migrate-postgres": "ts-node scripts/migrate_sqlite_to_postgres.ts --all",
     "prisma:generate": "prisma generate",
     "prisma:push": "prisma db push"
   },
@@ -15,6 +19,7 @@
     "@types/nodemailer": "^8.0.2",
     "axios": "^1.6.8",
     "bcryptjs": "^2.4.3",
+    "cloudinary": "^2.11.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",

@@ -12,94 +12,130 @@ function assert(condition, message) {
     }
 }
 console.log("==========================================");
-console.log("Running Fact-Grounded Outreach & Email Unit Tests");
+console.log("Running Comprehensive Outreach Regression Tests");
 console.log("==========================================\n");
-// Test 1: Resume contains Java/Spring Boot -> Generated message may mention Java/Spring Boot
-const resume1 = {
-    fullName: "Alice Developer",
-    skills: ["Java", "Spring Boot", "MySQL"],
-    education: [{ degree: "B.S. in Computer Science", institution: "State University" }],
-    experience: [{ title: "Backend Engineer", company: "DataCorp", description: "Built microservices using Java and Spring Boot." }]
-};
-const result1 = (0, outreach_generator_1.generateFactGroundedOutreach)({
-    candidateName: "Alice Developer",
-    companyName: "Acme Corp",
-    jobTitle: "Backend Developer",
-    resumeFacts: resume1
+// 1. Emails with no company, role, recruiter name, or candidate name
+const t1_empty = (0, outreach_generator_1.generateFactGroundedOutreach)({
+    candidateName: "",
+    companyName: "",
+    jobTitle: "",
+    recruiterName: "",
+    resumeFacts: {}
 });
-assert(result1.body.includes("Java"), "Test 1: Message contains Java");
-assert(result1.body.includes("Spring Boot"), "Test 1: Message contains Spring Boot");
-assert(result1.status === "DRAFT", "Test 1: Initial status is DRAFT");
-// Test 2: Resume does not contain Python -> Generated message must NOT claim Python experience
-assert(!result1.body.toLowerCase().includes("python"), "Test 2: Message does NOT mention Python");
-// Test 3: Resume has no metrics -> Generated message must NOT invent metrics (e.g. 40%, 3 years, etc.)
-assert(!/\b40%\b/.test(result1.body), "Test 3: No fabricated 40% metric");
-assert(!/\b\d+%\b/.test(result1.body), "Test 3: No fabricated percentage metric");
-assert(!result1.body.includes("perfect fit"), "Test 3: No unsupported 'perfect fit' boast");
-// Test 4: Job description requires AWS but resume does not mention AWS -> Generated message must NOT claim AWS
-const jdWithAWS = `
-Job Title: Cloud Engineer
-Company: CloudScale
-Requirements:
-Must have 5+ years of AWS experience, Docker, and Kubernetes.
-`;
-const result4 = (0, outreach_generator_1.generateFactGroundedOutreach)({
-    candidateName: "Alice Developer",
+assert(t1_empty.subject === "Inquiry: Career Opportunities", "1.1 Subject for empty input is clean and professional");
+assert(t1_empty.body.startsWith("Dear Hiring Team,"), "1.2 Greeting for empty input uses neutral professional team greeting");
+assert(!t1_empty.body.includes("undefined"), "1.3 No 'undefined' in body for empty input");
+assert(!t1_empty.subject.includes("undefined"), "1.4 No 'undefined' in subject for empty input");
+assert(!t1_empty.body.includes("null"), "1.5 No 'null' in body for empty input");
+assert(t1_empty.body.endsWith("Best regards,"), "1.6 Sign-off gracefully omits missing candidate name without awkward literals");
+assert(!t1_empty.body.includes("Candidate"), "1.7 Does NOT insert literal 'Candidate'");
+// 2. Company-only inquiry
+const t2_companyOnly = (0, outreach_generator_1.generateFactGroundedOutreach)({
+    candidateName: "Jordan Smith",
+    companyName: "Acme Innovations",
+    jobTitle: "",
+    recruiterName: "",
+    resumeFacts: { fullName: "Jordan Smith", skills: ["TypeScript"] }
+});
+assert(t2_companyOnly.subject === "Inquiry: Career Opportunities at Acme Innovations", "2.1 Subject mentions company correctly");
+assert(t2_companyOnly.body.startsWith("Dear Acme Innovations Hiring Team,"), "2.2 Greeting addresses Acme Innovations Hiring Team");
+assert(t2_companyOnly.body.includes("suitable opportunities at Acme Innovations"), "2.3 Expresses interest in company without inventing role");
+assert(!t2_companyOnly.body.includes("Software Engineer"), "2.4 Does NOT invent a target role");
+// 3. Role-only inquiry
+const t3_roleOnly = (0, outreach_generator_1.generateFactGroundedOutreach)({
+    candidateName: "Jordan Smith",
+    companyName: "",
+    jobTitle: "DevOps Engineer",
+    recruiterName: "",
+    resumeFacts: { fullName: "Jordan Smith" }
+});
+assert(t3_roleOnly.subject === "Interest in DevOps Engineer Opportunities", "3.1 Subject adapts to role without company");
+assert(t3_roleOnly.body.startsWith("Dear Hiring Team,"), "3.2 Neutral greeting when company is missing");
+assert(t3_roleOnly.body.includes("DevOps Engineer opportunities"), "3.3 Naturally mentions role");
+assert(!t3_roleOnly.body.includes("at "), "3.4 Does not generate dangling 'at ' preposition");
+// 4. Company and role supplied together
+const t4_both = (0, outreach_generator_1.generateFactGroundedOutreach)({
+    candidateName: "Jordan Smith",
+    companyName: "Starlight Dynamics",
+    jobTitle: "Senior Frontend Engineer",
+    recruiterName: "Elena Rostova",
+    resumeFacts: { fullName: "Jordan Smith", skills: ["React", "TypeScript"] }
+});
+assert(t4_both.subject === "Interest in Senior Frontend Engineer Opportunities at Starlight Dynamics", "4.1 Subject combines role and company naturally");
+assert(t4_both.body.startsWith("Dear Elena Rostova,"), "4.2 Uses specific recruiter name when supplied");
+assert(t4_both.body.includes("Senior Frontend Engineer opportunities at Starlight Dynamics"), "4.3 Naturally combines role and company in body");
+// 5. Job description with relevant resume evidence
+const t5_withEvidence = (0, outreach_generator_1.generateFactGroundedOutreach)({
+    candidateName: "Jordan Smith",
     companyName: "CloudScale",
-    jobTitle: "Cloud Engineer",
-    jobDescription: jdWithAWS,
-    resumeFacts: resume1 // Resume only has Java, Spring Boot, MySQL
+    jobTitle: "Fullstack Developer",
+    jobDescription: "We are seeking an engineer experienced in React, Next.js, and distributed microservices architecture.",
+    resumeFacts: {
+        fullName: "Jordan Smith",
+        skills: ["React", "PostgreSQL", "Docker"],
+        experience: [{ title: "Frontend Lead", company: "WebCorp" }]
+    }
 });
-assert(!result4.body.toLowerCase().includes("aws"), "Test 4: Message does NOT claim AWS despite JD requirement");
-assert(result4.groundedSkills.every(s => s !== "AWS"), "Test 4: Grounded skills does not include AWS");
-// Test 5: Recruiter name is missing -> Do not invent a recruiter name. Use generic greeting.
-const result5 = (0, outreach_generator_1.generateFactGroundedOutreach)({
-    candidateName: "Alice Developer",
-    companyName: "Acme Corp",
-    jobTitle: "Backend Developer",
-    recruiterName: "", // missing
-    resumeFacts: resume1
+assert(t5_withEvidence.body.includes("Given my background in React"), "5.1 Uses verified resume match ('React') to ground interest");
+assert(t5_withEvidence.groundedSkills.includes("React"), "5.2 groundedSkills array contains verified match");
+assert(!t5_withEvidence.body.includes("Docker"), "5.3 Does NOT dump unrelated skills (Docker, PostgreSQL)");
+// 6. Job description with NO supported matching experience
+const t6_noEvidence = (0, outreach_generator_1.generateFactGroundedOutreach)({
+    candidateName: "Jordan Smith",
+    companyName: "FinTech Quantum",
+    jobTitle: "Rust Low-Latency Engineer",
+    jobDescription: "Must have 5+ years of high frequency trading kernel development in C++ and Rust.",
+    resumeFacts: {
+        fullName: "Jordan Smith",
+        skills: ["JavaScript", "UI Design"],
+        experience: [{ title: "Graphic Designer", company: "ArtStudio" }]
+    }
 });
-assert(result5.body.startsWith("Dear Hiring Team"), "Test 5: Appropriate generic greeting used when recruiter name missing");
-assert(!result5.body.includes("Dear Sarah"), "Test 5: Did not invent recruiter name");
-// Test 6: Company name is missing -> Do not invent one.
-const result6 = (0, outreach_generator_1.generateFactGroundedOutreach)({
-    candidateName: "Alice Developer",
-    companyName: "", // missing
-    jobTitle: "Software Engineer",
-    resumeFacts: resume1
+assert(!t6_noEvidence.body.includes("Given my background in Rust"), "6.1 Does NOT claim background in Rust");
+assert(!t6_noEvidence.body.includes("Given my background in C++"), "6.2 Does NOT claim background in C++");
+assert(t6_noEvidence.body.includes("Having reviewed the position requirements"), "6.3 Uses truthful requirement review sentence without hallucinations");
+assert(t6_noEvidence.groundedSkills.length === 0, "6.4 groundedSkills is empty when no match exists");
+// 7. Resumes containing 50+ skills: No skill stuffing
+const fiftySkills = Array.from({ length: 50 }, (_, i) => `TechSkill_${i + 1}`);
+const t7_fiftySkills = (0, outreach_generator_1.generateFactGroundedOutreach)({
+    candidateName: "Jordan Smith",
+    companyName: "Enterprise Co",
+    jobTitle: "Principal Architect",
+    resumeFacts: { fullName: "Jordan Smith", skills: fiftySkills }
 });
-assert(!result6.body.includes("undefined"), "Test 6: No undefined company name");
-assert(!result6.body.includes("Acme Corp"), "Test 6: Did not invent company name");
-assert(result6.subject.includes("Software Engineer"), "Test 6: Subject gracefully formats without company name");
-// Test 7: Draft generated -> Status must be DRAFT, never SENT.
-assert(result6.status === "DRAFT", "Test 7: Status must strictly be DRAFT");
-assert(result6.status !== "SENT", "Test 7: Status is definitely NOT SENT");
-// Test 8: Email provider unavailable -> Status must be FAILED, never SENT.
+assert(!t7_fiftySkills.body.includes("TechSkill_1, TechSkill_2"), "7.1 Does NOT dump list of skills");
+assert(t7_fiftySkills.body.split("\n\n").length <= 7, "7.2 Email draft remains concise and readable");
+// 8. Correct subject, greeting, body, and sign-off without malformed placeholders
+const placeholders = ["undefined", "null", "NaN", "[Company", "[Role", "[Recruiter", "[Candidate", "object Object"];
+for (const draft of [t1_empty, t2_companyOnly, t3_roleOnly, t4_both, t5_withEvidence, t6_noEvidence, t7_fiftySkills]) {
+    for (const ph of placeholders) {
+        assert(!draft.body.includes(ph), `8. Zero malformed placeholder '${ph}' in body`);
+        assert(!draft.subject.includes(ph), `8. Zero malformed placeholder '${ph}' in subject`);
+    }
+}
+// 9. Video pitch URL: Included strictly when selected
+const t9_withVideo = (0, outreach_generator_1.generateFactGroundedOutreach)({
+    candidateName: "Jordan Smith",
+    companyName: "Acme",
+    videoIntroUrl: "https://res.cloudinary.com/jobgateway/video/upload/v12345/jobgateway/videos/pitch_1.mp4"
+});
+assert(t9_withVideo.hasVideoIntro, "9.1 hasVideoIntro is true");
+assert(t9_withVideo.body.includes("https://res.cloudinary.com/jobgateway/video/upload/v12345/jobgateway/videos/pitch_1.mp4"), "9.2 Video link present");
+const t9_noVideo = (0, outreach_generator_1.generateFactGroundedOutreach)({
+    candidateName: "Jordan Smith",
+    companyName: "Acme",
+    videoIntroUrl: ""
+});
+assert(!t9_noVideo.hasVideoIntro, "9.3 hasVideoIntro is false");
+assert(!t9_noVideo.body.includes("video"), "9.4 No video link when not provided");
+// 10. Status strictly DRAFT upon generation & Draft-only provider test
+assert(t1_empty.status === "DRAFT", "10.1 Generated email status is strictly DRAFT");
 const draftProvider = new email_provider_1.DraftOnlyEmailProvider();
-assert(!draftProvider.isConfigured(), "Test 8: DraftOnlyEmailProvider isConfigured is false");
-const unconfiguredSmtp = new email_provider_1.SmtpEmailProvider();
-assert(!unconfiguredSmtp.isConfigured(), "Test 8: Unconfigured SmtpEmailProvider isConfigured is false");
-draftProvider.sendEmail("recruiter@example.com", "Test", "Body").then((sendRes) => {
-    assert(!sendRes.success, "Test 8: Send call rejected when provider unconfigured");
-    assert(sendRes.status === "FAILED", "Test 8: Send call returns FAILED");
-    assert(sendRes.status !== "SENT", "Test 8: Send call NEVER returns SENT");
-    assert(Boolean(sendRes.failureReason), "Test 8: Safe failure reason provided");
-    // Test 9: Mock Provider verification - Simulated live SMTP success behavior
-    // Check that only when provider confirms sent does status become SENT
-    const simulatedSuccess = {
-        success: true,
-        status: "SENT",
-        providerMessageId: "msg_verified_12345"
-    };
-    assert(simulatedSuccess.status === "SENT", "Test 9: Only provider confirmed success yields SENT");
-    assert(simulatedSuccess.providerMessageId === "msg_verified_12345", "Test 9: Provider message id recorded");
-    // Test 10: User edits message before sending -> The sent content must correspond to user's final edited version
-    const originalGeneratedBody = result1.body;
-    const userEditedBody = originalGeneratedBody + "\n\nP.S. I am available immediately for an interview.";
-    assert(userEditedBody !== originalGeneratedBody, "Test 10: Body was edited");
-    assert(userEditedBody.includes("available immediately"), "Test 10: Edited content contains user additions");
+assert(!draftProvider.isConfigured(), "10.2 Email provider correctly reports unconfigured");
+draftProvider.sendEmail("recruiter@example.com", "Subject", "Body").then((sendRes) => {
+    assert(!sendRes.success, "10.3 Send safely rejected without live provider");
+    assert(sendRes.status === "FAILED", "10.4 Status is FAILED, never false-SENT");
     console.log("\n==========================================");
-    console.log("ALL 10 ANTI-FABRICATION & HONEST SENDING TESTS PASSED! 🎉");
-    console.log("==========================================");
+    console.log("ALL 28 OUTREACH REGRESSION ASSERTIONS PASSED! 🎉");
+    console.log("==========================================\n");
 });

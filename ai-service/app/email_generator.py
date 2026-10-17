@@ -1,9 +1,47 @@
 import re
 from typing import Dict, Any, List, Optional
 
+def find_relevant_match(
+    job_description: Optional[str] = "",
+    verified_skills: Optional[List[str]] = None,
+    experience_items: Optional[List[str]] = None
+) -> Optional[str]:
+    """
+    Identifies at most ONE relevant, truthful skill or domain match between
+    the job description and verified resume facts. Never invents claims.
+    """
+    if not job_description or not job_description.strip():
+        return None
+    lower_jd = job_description.lower()
+
+    # 1. Check verified skills
+    for s in (verified_skills or []):
+        if not s or len(s.strip()) < 2:
+            continue
+        clean = s.strip()
+        pattern = r'\b' + re.escape(clean) + r'\b'
+        if re.search(pattern, lower_jd, re.IGNORECASE):
+            return clean
+
+    # 2. Check key terms from experience titles
+    ignored_words = {
+        'from', 'with', 'senior', 'junior', 'lead', 'associate',
+        'developer', 'engineer', 'manager', 'specialist', 'analyst', 'intern'
+    }
+    for exp in (experience_items or []):
+        if not exp or len(exp.strip()) < 3:
+            continue
+        words = [w for w in re.split(r'[\s,/-]+', exp) if len(w) > 3 and w.lower() not in ignored_words]
+        for w in words:
+            pattern = r'\b' + re.escape(w) + r'\b'
+            if re.search(pattern, lower_jd, re.IGNORECASE):
+                return w
+
+    return None
+
 def generate_fact_grounded_email(
-    candidate_name: str,
-    top_skills: List[str],
+    candidate_name: Optional[str] = "",
+    top_skills: Optional[List[str]] = None,
     recruiter_name: Optional[str] = "",
     recruiter_email: Optional[str] = "",
     company_name: Optional[str] = "",
@@ -17,105 +55,119 @@ def generate_fact_grounded_email(
     primary_project: Optional[str] = ""
 ) -> Dict[str, Any]:
     """
-    Generates a fact-grounded outreach email.
-    Guarantees:
-    - Never fabricates skills not in top_skills
-    - Never invents recruiter or company name
-    - Uses neutral professional phrasing with zero hallucinated metrics
+    Generates a contextual, professional, editable recruiter outreach email draft.
+    Maintains 100% parity with the TypeScript outreach generator.
+    
+    Personalization rules (in priority order):
+    1. Company: If supplied, mention the correct company naturally.
+    2. Target role: If supplied, adapt the subject and opening to that role.
+    3. Job description: If supplied, identify at most one relevant, truthful reason for interest.
+       Use resume facts only if they genuinely support that reason. If no supported match, do not hallucinate.
+    4. Recruiter details: Use supplied recruiter's name when available; otherwise use appropriate greeting.
+    5. Candidate details: Use actual candidate name and verified information only.
     """
-    c_name = (candidate_name or "Candidate").strip()
+    raw_candidate = (candidate_name or "").strip()
+    c_name = "" if raw_candidate.lower() == "candidate" else raw_candidate
+
     r_name = (recruiter_name or "").strip()
     c_company = (company_name or "").strip()
     j_title = (job_title or "").strip()
+    j_desc = (job_description or "").strip()
     o_type = outreach_type or "recruiter_outreach"
     t_style = tone or "professional"
+    v_url = (video_intro_url or "").strip()
 
-    # 1. Greeting: do NOT invent recruiter name
-    greeting = f"Dear {r_name}" if r_name and r_name.lower() != "recruiter" else "Dear Hiring Team"
-
-    # 2. Intersect skills with JD if provided
-    grounded_skills = []
-    if job_description and job_description.strip():
-        jd_lower = job_description.lower()
-        for s in top_skills:
-            if s and s.strip():
-                # check if keyword in JD
-                pat = r'(?<![a-zA-Z0-9_])' + re.escape(s.lower()) + r'(?![a-zA-Z0-9_])'
-                if re.search(pat, jd_lower):
-                    grounded_skills.append(s)
-
-    if not grounded_skills and top_skills:
-        grounded_skills = [s for s in top_skills if s and s.strip()][:4]
-
-    # 3. Subject
-    role_context = f"{j_title} at {c_company}" if (j_title and c_company) else (j_title or (f"Opportunity at {c_company}" if c_company else "Expression of Interest"))
-    if o_type == "job_application":
-        subject = f"Job Application: {role_context} - {c_name}"
-    elif o_type == "referral_request":
-        subject = f"Inquiry regarding {role_context} - {c_name}"
-    elif o_type == "follow_up":
-        subject = f"Following Up: Application for {role_context} - {c_name}"
+    # 1. Greeting: never invent recruiter name
+    is_generic_rname = not r_name or r_name.lower() in ["recruiter", "hiring team", "hiring manager", "team"]
+    if not is_generic_rname:
+        greeting = f"Dear {r_name},"
+    elif c_company:
+        greeting = f"Dear {c_company} Hiring Team,"
     else:
-        subject = f"Inquiry / Expression of Interest: {role_context} - {c_name}"
+        greeting = "Dear Hiring Team,"
 
-    # 4. Body Paragraphs
-    body_paragraphs = []
-
-    if o_type == "job_application":
-        if c_company and j_title:
-            body_paragraphs.append(f"I am writing to express my interest in the {j_title} role at {c_company}.")
-        elif j_title:
-            body_paragraphs.append(f"I am writing to express my interest in the {j_title} position.")
-        elif c_company:
-            body_paragraphs.append(f"I am writing to express my interest in engineering opportunities at {c_company}.")
-        else:
-            body_paragraphs.append("I am reaching out regarding current engineering opportunities with your team.")
-    elif o_type == "referral_request":
-        body_paragraphs.append(f"I hope this note finds you well. I noticed your team's work at {c_company or 'your company'} and wanted to connect regarding engineering opportunities.")
-    elif o_type == "follow_up":
-        body_paragraphs.append(f"I hope you are having a productive week. I am following up on my application for the {j_title or 'open'} position{f' at {c_company}' if c_company else ''}.")
-    else:
-        if c_company and j_title:
-            body_paragraphs.append(f"I am reaching out to introduce myself and express interest in the {j_title} opening at {c_company}.")
-        elif c_company:
-            body_paragraphs.append(f"I am reaching out to introduce myself and inquire about software engineering opportunities at {c_company}.")
-        else:
-            body_paragraphs.append("I am reaching out to introduce myself and inquire about potential technical roles with your team.")
-
-    # Factual statements
-    fact_parts = []
-    if primary_education:
-        fact_parts.append(f"My background includes {primary_education}")
-    if primary_experience:
-        fact_parts.append(f"experience as {primary_experience}")
-
-    if grounded_skills:
-        skills_str = ", ".join(grounded_skills[:4])
-        if fact_parts:
-            body_paragraphs.append(f"{', with '.join(fact_parts)}. My practical technical background includes hands-on work with {skills_str}.")
-        else:
-            body_paragraphs.append(f"My practical technical background includes hands-on work with {skills_str}.")
-    elif fact_parts:
-        body_paragraphs.append(f"{', with '.join(fact_parts)}.")
-
-    if primary_project:
-        body_paragraphs.append(f"Recently, I developed {primary_project}, applying these technologies to build reliable functionality.")
-
-    # Tone adjustments
-    if t_style == "enthusiastic" and c_company:
-        body_paragraphs.append(f"I closely follow {c_company}'s engineering culture and would value the chance to contribute thoughtfully to your team's upcoming initiatives.")
-    elif t_style == "confident":
-        body_paragraphs.append("I am confident that my technical foundation and problem-solving focus align well with your team's technical standards.")
-
-    if video_intro_url and video_intro_url.strip():
-        body_paragraphs.append(f"To give a quick introduction, I have recorded a brief self-introduction video which you can view here: {video_intro_url.strip()}")
-
+    # 2. Subject Line
     if o_type == "follow_up":
-        body_paragraphs.append("I would welcome the opportunity to provide any additional details that might be helpful. Thank you for your continued time and consideration.")
+        if j_title and c_company:
+            subject = f"Following Up: {j_title} Application at {c_company}"
+        elif j_title:
+            subject = f"Following Up: {j_title} Application"
+        elif c_company:
+            subject = f"Following Up: Application with {c_company}"
+        else:
+            subject = "Following Up: Application Inquiry"
     else:
-        body_paragraphs.append("I have attached my resume for your review. If your schedule allows, I would welcome a brief introductory conversation to learn more about your team's priorities.")
+        if j_title and c_company:
+            subject = f"Interest in {j_title} Opportunities at {c_company}"
+        elif j_title:
+            subject = f"Interest in {j_title} Opportunities"
+        elif c_company:
+            subject = f"Inquiry: Career Opportunities at {c_company}"
+        else:
+            subject = "Inquiry: Career Opportunities"
 
-    full_body = f"{greeting},\n\n" + "\n\n".join(body_paragraphs) + f"\n\nSincerely,\n{c_name}"
+    # 3. Body Construction
+    paragraphs = []
+
+    # Opening line
+    if o_type == "follow_up":
+        paragraphs.append("I hope you are having a productive week.")
+    else:
+        paragraphs.append("I hope you are doing well.")
+
+    # Purpose / Expression of interest
+    if o_type == "follow_up":
+        if j_title and c_company:
+            paragraphs.append(f"I am following up on my application for the {j_title} role at {c_company} and would appreciate any updates on the hiring timeline.")
+        elif j_title:
+            paragraphs.append(f"I am following up on my application for the {j_title} role and would appreciate any updates on the hiring timeline.")
+        elif c_company:
+            paragraphs.append(f"I am following up on my application with {c_company} and would appreciate any updates on the hiring timeline.")
+        else:
+            paragraphs.append("I am following up on my application submitted previously and would appreciate any updates on the hiring timeline.")
+    elif o_type == "referral_request":
+        if j_title and c_company:
+            paragraphs.append(f"I am reaching out to explore potential {j_title} opportunities at {c_company}.")
+        elif c_company:
+            paragraphs.append(f"I am reaching out to explore potential career opportunities at {c_company}.")
+        else:
+            paragraphs.append("I am reaching out to explore potential opportunities where my background might align with your team.")
+    else:
+        # recruiter_outreach / job_application
+        if j_title and c_company:
+            paragraphs.append(f"I am writing to express my interest in {j_title} opportunities at {c_company}.")
+        elif j_title:
+            paragraphs.append(f"I am writing to express my interest in {j_title} opportunities.")
+        elif c_company:
+            paragraphs.append(f"I am writing to express my interest in suitable opportunities at {c_company}.")
+        else:
+            paragraphs.append("I am reaching out to express my interest in opportunities where my background might align with your team's needs.")
+
+    # 4. Contextual Job Description & Resume Facts Reasoning
+    matched_point = None
+    if o_type != "follow_up":
+        if j_desc:
+            exp_items = [primary_experience] if primary_experience else []
+            matched_point = find_relevant_match(j_desc, top_skills or [], exp_items)
+            if matched_point:
+                paragraphs.append(f"Given my background in {matched_point}, I was particularly drawn to your team's focus and would welcome the opportunity to discuss how my experience aligns with the role.")
+            else:
+                paragraphs.append("Having reviewed the position requirements, I would welcome the opportunity to discuss how my background and problem-solving focus could support your team's goals.")
+        else:
+            paragraphs.append("I would welcome the opportunity to discuss any suitable openings.")
+
+        paragraphs.append("I have attached my resume for your consideration.")
+
+    # 5. Video pitch link (ONLY when provided)
+    if v_url:
+        paragraphs.append(f"I have also included a brief video introduction: {v_url}")
+
+    # 6. Closing
+    paragraphs.append("Thank you for your time and consideration. I look forward to hearing from you.")
+
+    # 7. Sign-off
+    sign_off = f"Best regards,\n{c_name}" if c_name else "Best regards,"
+    full_body = f"{greeting}\n\n" + "\n\n".join(paragraphs) + f"\n\n{sign_off}"
 
     return {
         "type": o_type,
@@ -126,24 +178,24 @@ def generate_fact_grounded_email(
         "job_title": j_title,
         "subject": subject,
         "body": full_body,
-        "grounded_skills": grounded_skills,
+        "grounded_skills": [matched_point] if matched_point else [],
         "status": "DRAFT",
-        "has_video_intro": bool(video_intro_url and video_intro_url.strip())
+        "has_video_intro": bool(v_url)
     }
 
 def generate_recruiter_email(
     candidate_name: str,
-    candidate_title: str,
-    top_skills: list,
-    recruiter_name: str,
-    company_name: str,
-    job_title: str,
+    candidate_title: str = "",
+    top_skills: list = None,
+    recruiter_name: str = "",
+    company_name: str = "",
+    job_title: str = "",
     video_intro_url: str = ""
 ) -> Dict[str, Any]:
-    """Legacy backward-compatible adapter with fact-grounded safety."""
+    """Legacy backward-compatible adapter with contextual safety."""
     return generate_fact_grounded_email(
         candidate_name=candidate_name,
-        top_skills=top_skills,
+        top_skills=top_skills or [],
         recruiter_name=recruiter_name,
         company_name=company_name,
         job_title=job_title,

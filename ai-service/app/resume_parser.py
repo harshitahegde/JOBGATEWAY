@@ -1,9 +1,322 @@
 import io
 import re
-from typing import Dict, Any, List, Set, Tuple
+import urllib.parse
+import zipfile
+from typing import Dict, Any, List, Set, Tuple, Optional
+
+KNOWN_PLATFORMS = ['LinkedIn', 'GitHub', 'LeetCode', 'Codeforces', 'HackerRank', 'CodeChef', 'Kaggle', 'GitLab', 'Portfolio']
+
+def unescape_pdf_string(s: str) -> str:
+    """Unescapes octal and standard escape sequences in PDF literal strings."""
+    def replace_oct(m):
+        return chr(int(m.group(1), 8))
+    decoded = re.sub(r'\\([0-7]{1,3})', replace_oct, s)
+    decoded = (
+        decoded.replace('\\n', '\n')
+        .replace('\\r', '\r')
+        .replace('\\t', '\t')
+        .replace('\\b', '\b')
+        .replace('\\f', '\f')
+        .replace('\\(', '(')
+        .replace('\\)', ')')
+        .replace('\\\\', '\\')
+    )
+    return decoded.strip()
+
+def normalize_url(raw_url: str) -> Optional[str]:
+    """Cleans, normalizes, and validates URLs from resume documents."""
+    if not raw_url or not isinstance(raw_url, str):
+        return None
+    clean = raw_url.strip()
+
+    # Strip surrounding quotes, angle brackets, parentheses, trailing punctuation
+    clean = re.sub(r'^[<"\'\(\[\{\s]+|[>"\'\)\]\}\s.,;:]+$', '', clean)
+
+    if clean.lower().startswith("mailto:"):
+        return None
+
+    # Prepend https:// if missing
+    if re.match(r'^(?:www\.|[a-zA-Z0-9-]+\.(?:com|org|net|io|dev|me|ai|co|cn|in|app|tech|site|online)\b)', clean, re.IGNORECASE):
+        clean = f"https://{clean}"
+
+    try:
+        parsed = urllib.parse.urlparse(clean)
+        if parsed.scheme not in ["http", "https"]:
+            return None
+        if not parsed.netloc or ("." not in parsed.netloc and parsed.netloc != "localhost"):
+            return None
+
+        # Return canonical normalized URL with trailing slashes stripped
+        clean_path = parsed.path.rstrip("/")
+        norm = urllib.parse.urlunparse((
+            parsed.scheme,
+            parsed.netloc,
+            clean_path,
+            '',
+            parsed.query,
+            ''
+        ))
+        return norm
+    except Exception:
+        return None
+
+def detect_platform_from_url(url: str, anchor_text: str = "") -> Tuple[str, str]:
+    """
+    Detects platform based on actual destination URL hostname and path.
+    Does NOT infer platform merely from anchor text!
+    """
+    clean_anchor = (anchor_text or "").strip()
+    try:
+        parsed = urllib.parse.urlparse(url)
+        hostname = (parsed.hostname or "").lower()
+        pathname = parsed.path
+    except Exception:
+        m = re.match(r'^(?:https?:\/\/)?([^\/]+)(\/.*)?$', url, re.IGNORECASE)
+        hostname = (m.group(1) if m else "").lower()
+        pathname = m.group(2) if m and m.group(2) else ""
+
+    # 1. LeetCode
+    if "leetcode.com" in hostname or "leetcode.cn" in hostname:
+        return "LeetCode", clean_anchor or "LeetCode"
+
+    # 2. LinkedIn
+    if "linkedin.com" in hostname:
+        return "LinkedIn", clean_anchor or "LinkedIn"
+
+    # 3. GitHub
+    if "github.com" in hostname:
+        clean_path = pathname.strip("/").lower()
+        reserved = ["pricing", "features", "enterprise", "explore", "contact", "about", "topics", "trending", "collections"]
+        if clean_path not in reserved:
+            return "GitHub", clean_anchor or "GitHub"
+
+    # 4. GitLab
+    if "gitlab.com" in hostname:
+        return "GitLab", clean_anchor or "GitLab"
+
+    # 5. Codeforces
+    if "codeforces.com" in hostname:
+        return "Codeforces", clean_anchor or "Codeforces"
+
+    # 6. HackerRank
+    if "hackerrank.com" in hostname:
+        return "HackerRank", clean_anchor or "HackerRank"
+
+    # 7. CodeChef
+    if "codechef.com" in hostname:
+        return "CodeChef", clean_anchor or "CodeChef"
+
+    # 8. Kaggle
+    if "kaggle.com" in hostname:
+        return "Kaggle", clean_anchor or "Kaggle"
+
+    # 9. Portfolio / Personal Website
+    is_portfolio = (
+        "github.io" in hostname or
+        "gitlab.io" in hostname or
+        "vercel.app" in hostname or
+        "netlify.app" in hostname or
+        "pages.dev" in hostname or
+        hostname.endswith(".dev") or
+        hostname.endswith(".me") or
+        hostname.endswith(".site") or
+        hostname.endswith(".design") or
+        "portfolio" in hostname or
+        bool(re.search(r'portfolio|personal\s*site|personal\s*website', clean_anchor, re.IGNORECASE))
+    )
+    if is_portfolio:
+        return "Portfolio", clean_anchor or "Portfolio"
+
+    # 10. Other web link
+    return "Other", clean_anchor or hostname or "Web Link"
+
+def extract_pdf_links_bytes(file_bytes: bytes) -> List[Dict[str, Any]]:
+    """Extracts link annotations from PDF using pypdf and regex stream fallbacks."""
+    links = []
+    seen = set()
+
+    # 1. pypdf annotation inspection
+    try:
+        from pypdf import PdfReader
+        pdf_file = io.BytesIO(file_bytes)
+        reader = PdfReader(pdf_file)
+        for page in reader.pages:
+            annots = getattr(page, "annotations", None)
+            if annots is None and "/Annots" in page:
+                annots = page["/Annots"]
+
+            if annots:
+                annot_list = annots.get_object() if hasattr(annots, "get_object") else annots
+                if isinstance(annot_list, list):
+                    for a_ref in annot_list:
+                        a = a_ref.get_object() if hasattr(a_ref, "get_object") else a_ref
+                        if isinstance(a, dict):
+                            # Link annotation
+                            if a.get("/Subtype") == "/Link":
+                                action = a.get("/A")
+                                if action:
+                                    act_obj = action.get_object() if hasattr(action, "get_object") else action
+                                    if isinstance(act_obj, dict) and act_obj.get("/S") == "/URI":
+                                        raw_uri = str(act_obj.get("/URI", ""))
+                                        norm = normalize_url(raw_uri)
+                                        if norm and norm.lower() not in seen:
+                                            seen.add(norm.lower())
+                                            links.append({"url": norm, "source": "annotation"})
+                                elif a.get("/URI"):
+                                    raw_uri = str(a.get("/URI", ""))
+                                    norm = normalize_url(raw_uri)
+                                    if norm and norm.lower() not in seen:
+                                        seen.add(norm.lower())
+                                        links.append({"url": norm, "source": "annotation"})
+    except Exception as e:
+        pass
+
+    # 2. Raw buffer regex fallback for /URI (...) or /URI <hex>
+    try:
+        pdf_str = file_bytes.decode('latin1', errors='ignore')
+        uri_matches = re.findall(r'/URI\s*(?:\(([^)\r\n]+)\)|<([0-9a-fA-F]+)>)', pdf_str)
+        for lit, hx in uri_matches:
+            raw_url = ""
+            if lit:
+                raw_url = unescape_pdf_string(lit)
+            elif hx:
+                try:
+                    raw_url = bytes.fromhex(hx).decode('utf-8', errors='ignore')
+                except Exception:
+                    pass
+            norm = normalize_url(raw_url)
+            if norm and norm.lower() not in seen:
+                seen.add(norm.lower())
+                links.append({"url": norm, "source": "annotation"})
+    except Exception:
+        pass
+
+    return links
+
+def extract_docx_links_bytes(file_bytes: bytes) -> List[Dict[str, Any]]:
+    """Extracts hyperlinks and anchor text from DOCX relationships and document XML."""
+    links = []
+    seen = set()
+
+    try:
+        docx_file = io.BytesIO(file_bytes)
+        with zipfile.ZipFile(docx_file, 'r') as z:
+            # 1. Read word/_rels/document.xml.rels
+            rels_content = ""
+            if 'word/_rels/document.xml.rels' in z.namelist():
+                rels_content = z.read('word/_rels/document.xml.rels').decode('utf-8', errors='ignore')
+
+            # Map r:id -> target URL
+            rel_map = {}
+            for m in re.finditer(r'<Relationship\b[^>]*\bId=["\']([^"\']+)["\'][^>]*\bType=["\'][^"\']*hyperlink["\'][^>]*\bTarget=["\']([^"\']+)["\']', rels_content, re.IGNORECASE):
+                rel_map[m.group(1)] = m.group(2)
+            for m in re.finditer(r'<Relationship\b[^>]*\bTarget=["\']([^"\']+)["\'][^>]*\bId=["\']([^"\']+)["\'][^>]*\bType=["\'][^"\']*hyperlink["\']', rels_content, re.IGNORECASE):
+                rel_map[m.group(2)] = m.group(1)
+
+            # 2. Read word/document.xml for visible text
+            doc_xml = ""
+            if 'word/document.xml' in z.namelist():
+                doc_xml = z.read('word/document.xml').decode('utf-8', errors='ignore')
+
+            anchor_map = {}
+            for m in re.finditer(r'<w:hyperlink\b[^>]*\br:id=["\']([^"\']+)["\'][^>]*>([\s\S]*?)<\/w:hyperlink>', doc_xml, re.IGNORECASE):
+                r_id = m.group(1)
+                inner = m.group(2)
+                t_texts = re.findall(r'<w:t\b[^>]*>([^<]*)</w:t>', inner, re.IGNORECASE)
+                vis = "".join(t_texts).strip()
+                if vis:
+                    anchor_map[r_id] = vis
+
+            # 3. Assemble
+            for r_id, target in rel_map.items():
+                norm = normalize_url(target)
+                if norm and norm.lower() not in seen:
+                    seen.add(norm.lower())
+                    label = anchor_map.get(r_id, "")
+                    links.append({
+                        "url": norm,
+                        "label": label or None,
+                        "source": "docx_rel"
+                    })
+    except Exception:
+        pass
+
+    return links
+
+def extract_text_urls(text: str) -> List[Dict[str, Any]]:
+    """Finds visible web URLs in plain text."""
+    if not text:
+        return []
+    links = []
+    seen = set()
+    url_pattern = r'(?:https?:\/\/|www\.)[a-zA-Z0-9-._~:/?#\[\]@!$&\'()*+,;=%]+'
+    for raw in re.findall(url_pattern, text):
+        norm = normalize_url(raw)
+        if norm and norm.lower() not in seen:
+            seen.add(norm.lower())
+            links.append({"url": norm, "source": "text_match"})
+    return links
+
+def extract_profile_links(
+    embedded_links: List[Dict[str, Any]],
+    raw_text: str
+) -> Dict[str, Any]:
+    """
+    Merges and deduplicates destination URLs from embedded annotations and text.
+    Strictly never invents profile URLs when only the platform name is mentioned in text!
+    """
+    visible_links = extract_text_urls(raw_text)
+    link_map = {}
+
+    # 1. Embedded links first
+    for item in (embedded_links or []):
+        norm = normalize_url(item.get("url", ""))
+        if not norm:
+            continue
+        key = norm.lower()
+        if key not in link_map:
+            platform, label = detect_platform_from_url(norm, item.get("label", ""))
+            link_map[key] = {
+                "platform": platform,
+                "url": norm,
+                "label": label,
+                "source": item.get("source", "annotation")
+            }
+
+    # 2. Visible text URLs
+    for item in visible_links:
+        norm = normalize_url(item.get("url", ""))
+        if not norm:
+            continue
+        key = norm.lower()
+        if key not in link_map:
+            platform, label = detect_platform_from_url(norm, item.get("label", ""))
+            link_map[key] = {
+                "platform": platform,
+                "url": norm,
+                "label": label,
+                "source": "text_match"
+            }
+
+    profile_links = list(link_map.values())
+    detected_platforms = {l["platform"] for l in profile_links if l["platform"] != "Other"}
+    standard_platforms = ["LinkedIn", "GitHub", "LeetCode"]
+    missing_platforms = [p for p in standard_platforms if p not in detected_platforms]
+
+    return {
+        "profile_links": profile_links,
+        "platforms_detected": list(detected_platforms),
+        "platforms_missing": missing_platforms
+    }
 
 def parse_pdf_bytes(file_bytes: bytes) -> str:
-    """Extract text content from raw PDF bytes using pypdf. Detects image-only/scanned files."""
+    """Extract text content from raw PDF bytes using pypdf."""
+    text, _ = parse_pdf_bytes_with_links(file_bytes)
+    return text
+
+def parse_pdf_bytes_with_links(file_bytes: bytes) -> Tuple[str, List[Dict[str, Any]]]:
+    """Extract selectable text and link annotations from PDF bytes."""
+    links = extract_pdf_links_bytes(file_bytes)
     try:
         from pypdf import PdfReader
         pdf_file = io.BytesIO(file_bytes)
@@ -15,13 +328,19 @@ def parse_pdf_bytes(file_bytes: bytes) -> str:
                 text_parts.append(page_text)
         full_text = "\n".join(text_parts).strip()
         if not full_text:
-            return "PDF_SCANNED_OR_EMPTY: No selectable text extracted. The PDF may be a scanned image or empty."
-        return full_text
+            return "PDF_SCANNED_OR_EMPTY: No selectable text extracted. The PDF may be a scanned image or empty.", links
+        return full_text, links
     except Exception as e:
-        return f"PDF Parse Error: {str(e)}"
+        return f"PDF Parse Error: {str(e)}", links
 
 def parse_docx_bytes(file_bytes: bytes) -> str:
-    """Extract text content from raw DOCX bytes including paragraphs and tables."""
+    """Extract text content from raw DOCX bytes."""
+    text, _ = parse_docx_bytes_with_links(file_bytes)
+    return text
+
+def parse_docx_bytes_with_links(file_bytes: bytes) -> Tuple[str, List[Dict[str, Any]]]:
+    """Extract selectable text and hyperlinks from DOCX bytes."""
+    links = extract_docx_links_bytes(file_bytes)
     try:
         import docx
         docx_file = io.BytesIO(file_bytes)
@@ -30,7 +349,6 @@ def parse_docx_bytes(file_bytes: bytes) -> str:
         for para in doc.paragraphs:
             if para.text and para.text.strip():
                 full_text.append(para.text.strip())
-        # Also extract text from tables (often used in resume layouts)
         for table in doc.tables:
             for row in table.rows:
                 row_cells = [cell.text.strip() for cell in row.cells if cell.text.strip()]
@@ -38,24 +356,16 @@ def parse_docx_bytes(file_bytes: bytes) -> str:
                     full_text.append(" | ".join(row_cells))
         joined = "\n".join(full_text).strip()
         if not joined:
-            return "DOCX_EMPTY: No readable text found in DOCX file."
-        return joined
+            return "DOCX_EMPTY: No readable text found in DOCX file.", links
+        return joined, links
     except Exception as e:
-        return f"DOCX Parse Error: {str(e)}"
+        return f"DOCX Parse Error: {str(e)}", links
 
 def extract_email(text: str) -> str:
-    """Extracts email address from text with trailing dot cleanup."""
     email_match = re.search(r'[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+', text)
     return email_match.group(0).rstrip('.') if email_match else ""
 
 def extract_phone_number(text: str) -> str:
-    """
-    Extracts phone numbers across various international and national formats:
-    - (555) 019-2834, 555-019-2834, 555.019.2834, 555 019 2834
-    - +1 (555) 019-2834, +1-555-019-2834
-    - +91 98765 43210, +44 20 7946 0919, +61 2 9876 5432
-    - 01234 567890
-    """
     phone_candidates = re.findall(
         r'(?:(?:\+|00)\d{1,3}[-.\s]*)?(?:\(?\d{2,5}\)?[-.\s]*)?\d{3,5}[-.\s]*\d{3,5}(?:[-.\s]*\d{1,4})?',
         text
@@ -63,16 +373,13 @@ def extract_phone_number(text: str) -> str:
     for cand in phone_candidates:
         cand_clean = cand.strip()
         digits = re.sub(r'\D', '', cand_clean)
-        # Valid phone numbers generally have 7 to 15 digits
         if 7 <= len(digits) <= 15:
-            # Avoid matching year ranges like 2021-2026 or pure dates
             if re.match(r'^(?:19|20)\d{2}[-.\s]*(?:19|20)\d{2}$', cand_clean):
                 continue
             return cand_clean
     return ""
 
 def extract_linkedin_url(text: str) -> str:
-    """Matches full and partial LinkedIn URLs, handles dots, hyphens, and slashes."""
     match = re.search(r'(?:https?:\/\/)?(?:www\.)?linkedin\.com\/(?:in|pub)\/([a-zA-Z0-9_.-]+)', text, re.IGNORECASE)
     if match:
         username = match.group(1).rstrip('/')
@@ -80,7 +387,6 @@ def extract_linkedin_url(text: str) -> str:
     return ""
 
 def extract_github_url(text: str) -> str:
-    """Matches full and partial GitHub URLs, handles dots, hyphens, and slashes."""
     match = re.search(r'(?:https?:\/\/)?(?:www\.)?github\.com\/([a-zA-Z0-9_.-]+)', text, re.IGNORECASE)
     if match:
         username = match.group(1).rstrip('/')
@@ -89,29 +395,20 @@ def extract_github_url(text: str) -> str:
     return ""
 
 def extract_skills_from_section(section_lines: List[str]) -> List[str]:
-    """
-    Parses candidate's actual listed skills from the Skills section lines.
-    Handles commas, bullets, pipes, semicolons, and category headers like 'Languages: Python, Go'.
-    """
     skills = []
     seen = set()
-
     for line in section_lines:
         clean_line = line.strip()
         if not clean_line:
             continue
-
-        # If line contains category prefix like "Languages: Python, JavaScript" or "Backend - Node, Python"
         if ':' in clean_line:
             clean_line = clean_line.split(':', 1)[1]
         elif ' - ' in clean_line and len(clean_line.split(' - ')[0]) < 25:
             clean_line = clean_line.split(' - ', 1)[1]
 
-        # Split on commas, bullets, pipes, semicolons
         tokens = re.split(r'[,|;•·\t\n]+', clean_line)
         for tok in tokens:
             t = tok.strip().strip('-*• ')
-            # Filter out empty or too long sentences
             if t and len(t) <= 35 and not t.lower().startswith('etc') and len(t) > 1:
                 t_lower = t.lower()
                 if t_lower not in seen:
@@ -119,16 +416,33 @@ def extract_skills_from_section(section_lines: List[str]) -> List[str]:
                     skills.append(t)
     return skills
 
-def extract_structured_resume(raw_text: str) -> Dict[str, Any]:
+def extract_structured_resume(
+    raw_text: str,
+    embedded_links: Optional[List[Dict[str, Any]]] = None
+) -> Dict[str, Any]:
     """
-    Parses unstructured text into a clean resume structure:
-    personal_info, summary, skills, education, experience, projects, certifications, achievements
-    Preserves candidate's actual facts and never generates fictional experience or credentials.
-    Accurately distinguishes genuine absence from extraction status.
+    Parses unstructured text and extracted links into a structured resume model.
+    Guarantees:
+    - Never fabricates missing profile URLs
+    - Correctly detects platforms based on destination URL
+    - Populates profile_links, platforms_detected, platforms_missing
     """
+    links_data = extract_profile_links(embedded_links or [], raw_text)
+    profile_links = links_data["profile_links"]
+    platforms_detected = links_data["platforms_detected"]
+    platforms_missing = links_data["platforms_missing"]
+
     if not raw_text or not raw_text.strip():
         return {
-            "personal_info": {"full_name": "", "email": "", "phone": "", "location": "", "linkedin_url": "", "github_url": ""},
+            "personal_info": {
+                "full_name": "",
+                "email": "",
+                "phone": "",
+                "location": "",
+                "linkedin_url": "",
+                "github_url": "",
+                "profile_links": profile_links
+            },
             "summary": "",
             "skills": [],
             "education": [],
@@ -141,21 +455,26 @@ def extract_structured_resume(raw_text: str) -> Dict[str, Any]:
                 "word_count": 0,
                 "is_empty": True,
                 "fields_detected": [],
-                "fields_absent": ["full_name", "email", "phone", "skills", "experience", "education"]
+                "fields_absent": ["full_name", "email", "phone", "skills", "experience", "education"],
+                "profile_links_count": len(profile_links),
+                "platforms_detected": platforms_detected,
+                "platforms_missing": platforms_missing,
+                "link_extraction_status": "SUCCESS" if profile_links else "NO_LINKS_FOUND"
             }
         }
 
-    # 1. Contact Information Extraction
-    email_match = re.search(r'[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+', raw_text)
-    email = email_match.group(0).rstrip('.') if email_match else ""
+    email = extract_email(raw_text)
     phone = extract_phone_number(raw_text)
-    linkedin_url = extract_linkedin_url(raw_text)
-    github_url = extract_github_url(raw_text)
 
-    # 2. Section Partitioning
+    # Derive linkedin and github URLs from structured profile links if available
+    li_link = next((l["url"] for l in profile_links if l["platform"] == "LinkedIn"), "")
+    gh_link = next((l["url"] for l in profile_links if l["platform"] == "GitHub"), "")
+
+    linkedin_url = li_link or extract_linkedin_url(raw_text)
+    github_url = gh_link or extract_github_url(raw_text)
+
     lines = [line.strip() for line in raw_text.split('\n') if line.strip()]
 
-    # Infer candidate name from top lines (avoid emails/phones/URLs/common headings)
     name = ""
     for line in lines[:6]:
         l_low = line.lower()
@@ -169,12 +488,10 @@ def extract_structured_resume(raw_text: str) -> Dict[str, Any]:
             ])
             and not line.startswith('http')
         ):
-            # Clean up trailing pipes/bullets if any
             name = line.split('|')[0].split('•')[0].strip()
             if name:
                 break
 
-    # Section Headers Mapping (normalized lowercase)
     SECTION_SYNONYMS = {
         'summary': [
             'summary', 'professional summary', 'executive summary', 'profile', 'professional profile',
@@ -219,8 +536,7 @@ def extract_structured_resume(raw_text: str) -> Dict[str, Any]:
     }
 
     for line in lines:
-        # Normalize line for header detection
-        norm_line = re.sub(r'^[#*\-•\d.]+\s*', '', line)  # remove leading markdown, bullets, numbers
+        norm_line = re.sub(r'^[#*\-•\d.]+\s*', '', line)
         norm_line = norm_line.strip(':').strip('-').strip().lower()
 
         matched_section = None
@@ -234,10 +550,8 @@ def extract_structured_resume(raw_text: str) -> Dict[str, Any]:
         else:
             sections[current_section].append(line)
 
-    # 3. Summary
     summary_text = " ".join(sections['summary']).strip()
     if not summary_text and sections['header']:
-        # Header body lines after candidate name
         header_body = [
             l for l in sections['header']
             if l != name and "@" not in l and "github.com" not in l and "linkedin.com" not in l and len(l) > 20
@@ -245,12 +559,10 @@ def extract_structured_resume(raw_text: str) -> Dict[str, Any]:
         if header_body:
             summary_text = " ".join(header_body[:2]).strip()
 
-    # 4. Skills: Combine candidate's listed skills with technical keyword detections
     candidate_skills = extract_skills_from_section(sections['skills'])
     from app.ats_analyzer import extract_tech_keywords
     known_tech = extract_tech_keywords(raw_text)
 
-    # Merge preserving order and unique names
     all_skills = []
     seen_skills = set()
     for s in candidate_skills:
@@ -263,7 +575,6 @@ def extract_structured_resume(raw_text: str) -> Dict[str, Any]:
             seen_skills.add(s.lower())
             all_skills.append(s)
 
-    # 5. Education Parsing
     education_list = []
     if sections['education']:
         curr_edu = {}
@@ -290,7 +601,6 @@ def extract_structured_resume(raw_text: str) -> Dict[str, Any]:
         if curr_edu:
             education_list.append(curr_edu)
 
-    # 6. Experience Parsing
     experience_list = []
     if sections['experience']:
         curr_exp = None
@@ -325,7 +635,6 @@ def extract_structured_resume(raw_text: str) -> Dict[str, Any]:
         if curr_exp:
             experience_list.append(curr_exp)
 
-    # 7. Projects Parsing
     projects_list = []
     if sections['projects']:
         curr_proj = {}
@@ -342,18 +651,15 @@ def extract_structured_resume(raw_text: str) -> Dict[str, Any]:
         if curr_proj:
             projects_list.append(curr_proj)
 
-    # 8. Certifications & Achievements
     certifications = [l.strip('-•* ') for l in sections['certifications'] if len(l.strip()) > 2]
     achievements = [l.strip('-•* ') for l in sections['achievements'] if len(l.strip()) > 2]
 
-    # Location heuristic from header if present
     location = ""
     for hl in sections['header']:
         if any(state in hl for state in [", CA", ", NY", ", TX", ", WA", ", FL", "Remote", "USA", "United States", "San Francisco", "New York"]):
             location = hl.split('|')[0].strip()
             break
 
-    # Build detection and absent metadata
     fields_detected = []
     fields_absent = []
 
@@ -387,7 +693,8 @@ def extract_structured_resume(raw_text: str) -> Dict[str, Any]:
             "phone": phone,
             "location": location,
             "linkedin_url": linkedin_url,
-            "github_url": github_url
+            "github_url": github_url,
+            "profile_links": profile_links
         },
         "summary": summary_text,
         "skills": all_skills,
@@ -401,6 +708,10 @@ def extract_structured_resume(raw_text: str) -> Dict[str, Any]:
             "word_count": word_count,
             "is_empty": False,
             "fields_detected": fields_detected,
-            "fields_absent": fields_absent
+            "fields_absent": fields_absent,
+            "profile_links_count": len(profile_links),
+            "platforms_detected": platforms_detected,
+            "platforms_missing": platforms_missing,
+            "link_extraction_status": "SUCCESS" if profile_links else "NO_LINKS_FOUND"
         }
     }

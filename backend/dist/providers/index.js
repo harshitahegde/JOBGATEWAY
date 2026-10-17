@@ -154,10 +154,12 @@ class RealOrMockAIProvider {
     }
 }
 exports.RealOrMockAIProvider = RealOrMockAIProvider;
+const storage_provider_1 = require("./storage_provider");
 // 5. Provider Export Registry
 exports.providers = {
     job: new UnconfiguredJobProvider(),
     emailFinder: new UnconfiguredEmailFinderProvider(),
     emailSender: (0, email_provider_1.createEmailProvider)(),
-    ai: new RealOrMockAIProvider()
+    ai: new RealOrMockAIProvider(),
+    videoStorage: (0, storage_provider_1.createVideoStorageProvider)()
 };

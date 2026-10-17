@@ -4,7 +4,13 @@ from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 
 from app.ats_analyzer import calculate_ats_score
-from app.resume_parser import parse_pdf_bytes, parse_docx_bytes, extract_structured_resume
+from app.resume_parser import (
+    parse_pdf_bytes,
+    parse_docx_bytes,
+    parse_pdf_bytes_with_links,
+    parse_docx_bytes_with_links,
+    extract_structured_resume
+)
 from app.resume_optimizer import optimize_resume_content
 from app.resume_analyzer import analyze_resume_content
 from app.email_generator import generate_recruiter_email
@@ -69,11 +75,12 @@ def ats_score_endpoint(payload: ATSRequest):
 async def parse_resume_endpoint(file: UploadFile = File(...)):
     contents = await file.read()
     filename = file.filename.lower()
+    embedded_links = []
     
     if filename.endswith(".pdf"):
-        raw_text = parse_pdf_bytes(contents)
+        raw_text, embedded_links = parse_pdf_bytes_with_links(contents)
     elif filename.endswith(".docx") or filename.endswith(".doc"):
-        raw_text = parse_docx_bytes(contents)
+        raw_text, embedded_links = parse_docx_bytes_with_links(contents)
     else:
         raw_text = contents.decode("utf-8", errors="ignore")
         
@@ -85,7 +92,7 @@ async def parse_resume_endpoint(file: UploadFile = File(...)):
     if raw_text.startswith("PDF Parse Error") or raw_text.startswith("DOCX Parse Error"):
         raise HTTPException(status_code=400, detail=f"Failed to parse resume file: {raw_text}. Ensure the file is unencrypted and text-readable.")
 
-    structured_data = extract_structured_resume(raw_text)
+    structured_data = extract_structured_resume(raw_text, embedded_links=embedded_links)
     return {
         "filename": file.filename,
         "raw_text": raw_text,

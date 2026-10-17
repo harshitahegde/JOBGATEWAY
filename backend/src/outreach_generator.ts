@@ -1,5 +1,3 @@
-import { extractTechKeywords, parseJDSections } from './ats_engine';
-
 export type OutreachType = 'recruiter_outreach' | 'job_application' | 'referral_request' | 'follow_up';
 export type OutreachTone = 'professional' | 'concise' | 'enthusiastic' | 'confident';
 
@@ -49,7 +47,7 @@ export interface OutreachGenerateResult {
 }
 
 /**
- * Normalizes and extracts verifiable facts from user's structured or raw resume data.
+ * Normalizes verifiable facts from user's structured resume data.
  * Does not fabricate missing items.
  */
 export function extractVerifiableResumeFacts(facts?: ResumeFactsInput): {
@@ -67,230 +65,233 @@ export function extractVerifiableResumeFacts(facts?: ResumeFactsInput): {
     projectItems: [] as string[]
   };
 
-  const skillsSet = new Set<string>();
-
-  // 1. Direct skills array
   if (Array.isArray(facts?.skills)) {
     for (const s of facts.skills) {
       if (typeof s === 'string' && s.trim()) {
-        const extracted = extractTechKeywords(s);
-        if (extracted.length > 0) {
-          extracted.forEach(k => skillsSet.add(k));
-        } else {
-          skillsSet.add(s.trim());
-        }
+        result.allSkills.push(s.trim());
       }
     }
   }
 
-  // 2. From raw text or summary
-  if (facts?.rawText) {
-    extractTechKeywords(facts.rawText).forEach(k => skillsSet.add(k));
-  }
-  if (facts?.summary) {
-    extractTechKeywords(facts.summary).forEach(k => skillsSet.add(k));
-  }
-
-  // 3. From projects
-  if (Array.isArray(facts?.projects)) {
-    for (const p of facts.projects) {
-      const pName = p.name?.trim();
-      const pDesc = p.description?.trim();
-      if (pName) {
-        result.projectItems.push(pDesc ? `${pName} (${pDesc.slice(0, 100)})` : pName);
-      }
-      if (pDesc) {
-        extractTechKeywords(pDesc).forEach(k => skillsSet.add(k));
-      }
-      if (Array.isArray(p.technologies)) {
-        p.technologies.forEach(t => {
-          if (typeof t === 'string' && t.trim()) skillsSet.add(t.trim());
-        });
-      }
-    }
-  }
-
-  // 4. From experience
-  if (Array.isArray(facts?.experience)) {
-    for (const exp of facts.experience) {
-      const expTitle = exp.title?.trim();
-      const expCompany = exp.company?.trim();
-      if (expTitle) {
-        result.experienceItems.push(expCompany ? `${expTitle} at ${expCompany}` : expTitle);
-      }
-      if (exp.description) {
-        extractTechKeywords(exp.description).forEach(k => skillsSet.add(k));
-      }
-    }
-  }
-
-  // 5. From education
   if (Array.isArray(facts?.education)) {
     for (const edu of facts.education) {
       const deg = edu.degree?.trim();
       const inst = edu.institution?.trim();
-      if (deg) {
-        result.educationItems.push(inst ? `${deg} from ${inst}` : deg);
-      } else if (inst) {
-        result.educationItems.push(inst);
-      }
+      if (deg && inst) result.educationItems.push(`${deg} from ${inst}`);
+      else if (deg || inst) result.educationItems.push(deg || inst || '');
     }
   }
 
-  result.allSkills = Array.from(skillsSet);
+  if (Array.isArray(facts?.experience)) {
+    for (const exp of facts.experience) {
+      const title = exp.title?.trim();
+      const comp = exp.company?.trim();
+      if (title && comp) result.experienceItems.push(`${title} at ${comp}`);
+      else if (title || comp) result.experienceItems.push(title || comp || '');
+    }
+  }
+
+  if (Array.isArray(facts?.projects)) {
+    for (const proj of facts.projects) {
+      if (proj.name?.trim()) result.projectItems.push(proj.name.trim());
+    }
+  }
+
   return result;
 }
 
 /**
- * Pure, deterministic fact-grounded outreach message generator.
- * Rule: Never fabricate candidate skills, job history, metrics, or credentials.
- * Only skills that exist in the resume are referenced.
+ * Checks for at most ONE relevant, truthful skill or domain match between
+ * the job description and the candidate's verified resume facts.
+ * Never invents skills or claims.
+ */
+export function findRelevantMatch(
+  jobDescription?: string,
+  verifiedSkills: string[] = [],
+  experienceItems: string[] = []
+): string | null {
+  if (!jobDescription || !jobDescription.trim()) return null;
+  const lowerJD = jobDescription.toLowerCase();
+
+  // 1. Check verified skills with word-boundary matching
+  for (const skill of verifiedSkills) {
+    if (!skill || skill.trim().length < 2) continue;
+    const clean = skill.trim();
+    const escaped = clean.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const regex = new RegExp(`\\b${escaped}\\b`, 'i');
+    if (regex.test(lowerJD)) {
+      return clean;
+    }
+  }
+
+  // 2. Check key domains from experience titles
+  const ignoredWords = new Set(['from', 'with', 'senior', 'junior', 'lead', 'associate', 'developer', 'engineer', 'manager', 'specialist', 'analyst', 'intern']);
+  for (const exp of experienceItems) {
+    if (!exp || exp.trim().length < 3) continue;
+    const words = exp.split(/[\s,/-]+/).filter(w => w.length > 3 && !ignoredWords.has(w.toLowerCase()));
+    for (const w of words) {
+      const escaped = w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const regex = new RegExp(`\\b${escaped}\\b`, 'i');
+      if (regex.test(lowerJD)) {
+        return w;
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Generates a contextual, professional, editable recruiter outreach email draft.
+ * 
+ * Personalization rules (in priority order):
+ * 1. Company: If supplied, mention the correct company naturally.
+ * 2. Target role: If supplied, adapt the subject and opening to that role.
+ * 3. Job description: If supplied, identify at most one relevant, truthful reason for interest.
+ *    Use resume facts only if they genuinely support that reason. If no supported match, do not hallucinate.
+ * 4. Recruiter details: Use supplied recruiter's name when available; otherwise use appropriate greeting.
+ * 5. Candidate details: Use actual candidate name and verified information only.
+ * 
+ * Strict safety guarantees:
+ * - Never dump random skill lists or stuff skills into emails.
+ * - Never invent recruiter names, companies, roles, metrics, or candidate experience.
+ * - Gracefully omit missing fields without "undefined" or malformed placeholders.
+ * - Include video pitch link strictly when explicitly provided.
  */
 export function generateFactGroundedOutreach(input: OutreachGenerateInput): OutreachGenerateResult {
   const type: OutreachType = input.type || 'recruiter_outreach';
   const tone: OutreachTone = input.tone || 'professional';
 
   const verified = extractVerifiableResumeFacts(input.resumeFacts);
-  const candidateName = (input.candidateName || verified.fullName || 'Candidate').trim();
+  const rawCandidateName = (input.candidateName || verified.fullName || '').trim();
+  // Do not insert the literal string "Candidate" if name is missing
+  const candidateName = rawCandidateName.toLowerCase() === 'candidate' ? '' : rawCandidateName;
 
-  // Recruiter & Target Details: Do NOT fabricate
-  const recruiterName = input.recruiterName?.trim() || '';
-  const recipientEmail = input.recruiterEmail?.trim() || '';
-  const companyName = input.companyName?.trim() || '';
-  const jobTitle = input.jobTitle?.trim() || '';
+  const recruiterName = (input.recruiterName || '').trim();
+  const recipientEmail = (input.recruiterEmail || '').trim();
+  const companyName = (input.companyName || '').trim();
+  const jobTitle = (input.jobTitle || '').trim();
+  const jobDescription = (input.jobDescription || '').trim();
+  const videoIntroUrl = (input.videoIntroUrl || '').trim();
 
-  // Determine Greeting: If recruiterName is missing, do not invent one
-  const greeting = recruiterName ? `Dear ${recruiterName}` : 'Dear Hiring Team';
-
-  // Job Description Grounding: intersect verified resume skills with JD skills
-  let groundedSkills: string[] = [];
-  if (input.jobDescription && input.jobDescription.trim()) {
-    const jdLower = input.jobDescription.toLowerCase();
-    const { allJdSkills } = parseJDSections(input.jobDescription);
-    const jdSkillsLower = new Set(allJdSkills.map(s => s.toLowerCase()));
-
-    groundedSkills = verified.allSkills.filter(skill => {
-      const sLower = skill.toLowerCase().trim();
-      if (jdSkillsLower.has(sLower)) return true;
-      const escaped = sLower.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const pattern = new RegExp(`(?<![a-zA-Z0-9_])${escaped}(?![a-zA-Z0-9_])`, 'i');
-      return pattern.test(jdLower);
-    });
+  // 1. Determine Greeting: Never invent a name
+  let greeting: string;
+  const isGenericRecruiterName = !recruiterName || ['recruiter', 'hiring team', 'hiring manager', 'team'].includes(recruiterName.toLowerCase());
+  
+  if (!isGenericRecruiterName) {
+    greeting = `Dear ${recruiterName},`;
+  } else if (companyName) {
+    greeting = `Dear ${companyName} Hiring Team,`;
+  } else {
+    greeting = 'Dear Hiring Team,';
   }
 
-  // Fallback to top verified resume skills only if JD intersection is empty
-  if (groundedSkills.length === 0 && verified.allSkills.length > 0) {
-    groundedSkills = verified.allSkills.slice(0, 4);
-  }
-
-  // Education & Experience grounded mentions
-  const primaryEducation = verified.educationItems.length > 0 ? verified.educationItems[0] : '';
-  const primaryExperience = verified.experienceItems.length > 0 ? verified.experienceItems[0] : '';
-  const primaryProject = verified.projectItems.length > 0 ? verified.projectItems[0] : '';
-
-  // Build subject line based on role and company
-  let subject = '';
-  const roleContext = jobTitle && companyName
-    ? `${jobTitle} at ${companyName}`
-    : jobTitle || (companyName ? `Opportunity at ${companyName}` : 'Expression of Interest');
-
-  switch (type) {
-    case 'job_application':
-      subject = `Job Application: ${roleContext} - ${candidateName}`;
-      break;
-    case 'referral_request':
-      subject = `Inquiry regarding ${roleContext} - ${candidateName}`;
-      break;
-    case 'follow_up':
-      subject = `Following Up: Application for ${roleContext} - ${candidateName}`;
-      break;
-    case 'recruiter_outreach':
-    default:
-      subject = `Inquiry / Expression of Interest: ${roleContext} - ${candidateName}`;
-      break;
-  }
-
-  // Construct grounded body
-  const bodyParagraphs: string[] = [];
-
-  // Paragraph 1: Purpose of message
-  if (type === 'job_application') {
-    if (companyName && jobTitle) {
-      bodyParagraphs.push(`I am writing to express my interest in the ${jobTitle} role at ${companyName}.`);
+  // 2. Build Contextual Subject Line
+  let subject: string;
+  if (type === 'follow_up') {
+    if (jobTitle && companyName) {
+      subject = `Following Up: ${jobTitle} Application at ${companyName}`;
     } else if (jobTitle) {
-      bodyParagraphs.push(`I am writing to express my interest in the ${jobTitle} position.`);
+      subject = `Following Up: ${jobTitle} Application`;
     } else if (companyName) {
-      bodyParagraphs.push(`I am writing to express my interest in engineering opportunities at ${companyName}.`);
+      subject = `Following Up: Application with ${companyName}`;
     } else {
-      bodyParagraphs.push(`I am reaching out regarding current engineering opportunities with your team.`);
+      subject = 'Following Up: Application Inquiry';
+    }
+  } else {
+    if (jobTitle && companyName) {
+      subject = `Interest in ${jobTitle} Opportunities at ${companyName}`;
+    } else if (jobTitle) {
+      subject = `Interest in ${jobTitle} Opportunities`;
+    } else if (companyName) {
+      subject = `Inquiry: Career Opportunities at ${companyName}`;
+    } else {
+      subject = 'Inquiry: Career Opportunities';
+    }
+  }
+
+  // 3. Body Construction
+  const paragraphs: string[] = [];
+
+  // Opening line
+  if (type === 'follow_up') {
+    paragraphs.push('I hope you are having a productive week.');
+  } else {
+    paragraphs.push('I hope you are doing well.');
+  }
+
+  // Purpose / Expression of Interest (adapts to company and role)
+  if (type === 'follow_up') {
+    if (jobTitle && companyName) {
+      paragraphs.push(`I am following up on my application for the ${jobTitle} role at ${companyName} and would appreciate any updates on the hiring timeline.`);
+    } else if (jobTitle) {
+      paragraphs.push(`I am following up on my application for the ${jobTitle} role and would appreciate any updates on the hiring timeline.`);
+    } else if (companyName) {
+      paragraphs.push(`I am following up on my application with ${companyName} and would appreciate any updates on the hiring timeline.`);
+    } else {
+      paragraphs.push('I am following up on my application submitted previously and would appreciate any updates on the hiring timeline.');
     }
   } else if (type === 'referral_request') {
     const contact = input.referralContactName?.trim();
-    if (contact) {
-      bodyParagraphs.push(`I hope you are doing well. ${contact} suggested I connect with you regarding engineering opportunities at ${companyName || 'your company'}.`);
-    } else {
-      bodyParagraphs.push(`I hope this note finds you well. I noticed your work at ${companyName || 'your company'} and wanted to connect regarding engineering opportunities.`);
-    }
-  } else if (type === 'follow_up') {
-    bodyParagraphs.push(`I hope you are having a productive week. I am following up on my application for the ${jobTitle ? `${jobTitle} role` : 'open position'}${companyName ? ` at ${companyName}` : ''}.`);
-  } else {
-    // recruiter_outreach
-    if (companyName && jobTitle) {
-      bodyParagraphs.push(`I am reaching out to introduce myself and express interest in the ${jobTitle} opening at ${companyName}.`);
+    if (contact && jobTitle && companyName) {
+      paragraphs.push(`${contact} suggested I reach out to you regarding ${jobTitle} opportunities at ${companyName}.`);
+    } else if (contact && companyName) {
+      paragraphs.push(`${contact} suggested I reach out to you regarding career opportunities at ${companyName}.`);
+    } else if (contact) {
+      paragraphs.push(`${contact} suggested I reach out to you to explore potential opportunities with your team.`);
+    } else if (jobTitle && companyName) {
+      paragraphs.push(`I am reaching out to explore potential ${jobTitle} opportunities at ${companyName}.`);
     } else if (companyName) {
-      bodyParagraphs.push(`I am reaching out to introduce myself and inquire about software engineering opportunities at ${companyName}.`);
+      paragraphs.push(`I am reaching out to explore potential career opportunities at ${companyName}.`);
     } else {
-      bodyParagraphs.push(`I am reaching out to introduce myself and inquire about potential technical roles with your team.`);
+      paragraphs.push('I am reaching out to explore potential opportunities where my background might align with your team.');
     }
-  }
-
-  // Paragraph 2: Grounded facts (Strictly from verified resume data)
-  const factStatements: string[] = [];
-  if (primaryEducation) {
-    factStatements.push(`My background includes ${primaryEducation}`);
-  }
-  if (primaryExperience) {
-    factStatements.push(`experience as ${primaryExperience}`);
-  }
-  if (groundedSkills.length > 0) {
-    const skillsListStr = groundedSkills.slice(0, 4).join(', ');
-    if (factStatements.length > 0) {
-      bodyParagraphs.push(`${factStatements.join(', with ')}. My practical technical background includes hands-on work with ${skillsListStr}.`);
-    } else {
-      bodyParagraphs.push(`My practical technical background includes hands-on work with ${skillsListStr}.`);
-    }
-  } else if (factStatements.length > 0) {
-    bodyParagraphs.push(`${factStatements.join(', with ')}.`);
-  }
-
-  if (primaryProject) {
-    bodyParagraphs.push(`Recently, I developed ${primaryProject}, applying these technologies to build reliable functionality.`);
-  }
-
-  // Tone adjustments (strictly professional phrasing without injecting unverified metrics)
-  if (tone === 'concise') {
-    // Keep brief
-  } else if (tone === 'enthusiastic') {
-    if (companyName) {
-      bodyParagraphs.push(`I closely follow ${companyName}'s engineering culture and would value the chance to contribute thoughtfully to your team's upcoming initiatives.`);
-    }
-  } else if (tone === 'confident') {
-    bodyParagraphs.push(`I am confident that my technical foundation and problem-solving focus align well with your team's technical standards.`);
-  }
-
-  // Optional video intro
-  if (input.videoIntroUrl && input.videoIntroUrl.trim()) {
-    bodyParagraphs.push(`To give a quick introduction, I have recorded a brief self-introduction video which you can view here: ${input.videoIntroUrl.trim()}`);
-  }
-
-  // Closing Call to Action
-  if (type === 'follow_up') {
-    bodyParagraphs.push(`I would welcome the opportunity to provide any additional details that might be helpful. Thank you for your continued time and consideration.`);
   } else {
-    bodyParagraphs.push(`I have attached my resume for your review. If your schedule allows, I would welcome a brief introductory conversation to learn more about your team's priorities.`);
+    // recruiter_outreach / job_application
+    if (jobTitle && companyName) {
+      paragraphs.push(`I am writing to express my interest in ${jobTitle} opportunities at ${companyName}.`);
+    } else if (jobTitle) {
+      paragraphs.push(`I am writing to express my interest in ${jobTitle} opportunities.`);
+    } else if (companyName) {
+      paragraphs.push(`I am writing to express my interest in suitable opportunities at ${companyName}.`);
+    } else {
+      paragraphs.push('I am reaching out to express my interest in opportunities where my background might align with your team\'s needs.');
+    }
   }
 
-  const fullBody = `${greeting},\n\n${bodyParagraphs.join('\n\n')}\n\nSincerely,\n${candidateName}`;
+  // 4. Job Description & Contextual Grounding (at most ONE relevant reason)
+  let matchedPoint: string | null = null;
+
+  if (type !== 'follow_up') {
+    if (jobDescription) {
+      matchedPoint = findRelevantMatch(jobDescription, verified.allSkills, verified.experienceItems);
+      if (matchedPoint) {
+        // Job description with relevant resume evidence
+        paragraphs.push(`Given my background in ${matchedPoint}, I was particularly drawn to your team's focus and would welcome the opportunity to discuss how my experience aligns with the role.`);
+      } else {
+        // Job description with NO supported matching experience: truthful, no hallucinations
+        paragraphs.push('Having reviewed the position requirements, I would welcome the opportunity to discuss how my background and problem-solving focus could support your team\'s goals.');
+      }
+    } else {
+      // No job description supplied: clean standard inquiry
+      paragraphs.push('I would welcome the opportunity to discuss any suitable openings.');
+    }
+
+    // Resume attachment statement
+    paragraphs.push('I have attached my resume for your consideration.');
+  }
+
+  // 5. Video pitch introduction (ONLY when explicitly provided)
+  if (videoIntroUrl) {
+    paragraphs.push(`I have also included a brief video introduction: ${videoIntroUrl}`);
+  }
+
+  // 6. Closing Call to Action
+  paragraphs.push('Thank you for your time and consideration. I look forward to hearing from you.');
+
+  // 7. Professional Sign-off
+  const signOff = candidateName ? `Best regards,\n${candidateName}` : 'Best regards,';
+  const fullBody = `${greeting}\n\n${paragraphs.join('\n\n')}\n\n${signOff}`;
 
   return {
     type,
@@ -301,14 +302,14 @@ export function generateFactGroundedOutreach(input: OutreachGenerateInput): Outr
     jobTitle,
     subject,
     body: fullBody,
-    groundedSkills,
+    groundedSkills: matchedPoint ? [matchedPoint] : [],
     status: 'DRAFT',
-    hasVideoIntro: Boolean(input.videoIntroUrl?.trim()),
+    hasVideoIntro: Boolean(videoIntroUrl),
     factsTraceable: {
-      skillsUsed: groundedSkills,
-      educationUsed: primaryEducation ? [primaryEducation] : [],
-      experienceUsed: primaryExperience ? [primaryExperience] : [],
-      projectsUsed: primaryProject ? [primaryProject] : []
+      skillsUsed: matchedPoint ? [matchedPoint] : [],
+      educationUsed: verified.educationItems.slice(0, 1),
+      experienceUsed: verified.experienceItems.slice(0, 1),
+      projectsUsed: verified.projectItems.slice(0, 1)
     }
   };
 }

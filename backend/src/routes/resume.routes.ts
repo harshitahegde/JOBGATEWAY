@@ -166,11 +166,16 @@ router.post('/upload', authenticateToken, handleResumeUpload, async (req: Authen
 router.get('/versions/:versionId', authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const userId = req.user!.userId;
-    const versionId = parseInt(req.params.versionId, 10);
+    const versionId = parseInt(req.params.id || req.params.versionId, 10);
     if (isNaN(versionId)) return res.status(400).json({ error: 'Invalid version ID' });
 
     const version = await prisma.resumeVersion.findFirst({
-      where: { id: versionId, userId }
+      where: { id: versionId, userId },
+      include: {
+        videoAttachments: {
+          include: { video: true }
+        }
+      }
     });
 
     if (!version) return res.status(404).json({ error: 'Resume version not found' });
@@ -207,6 +212,11 @@ router.put('/versions/:versionId', authenticateToken, async (req: AuthenticatedR
         targetJobTitle: targetJobTitle !== undefined ? targetJobTitle : existing.targetJobTitle,
         targetCompany: targetCompany !== undefined ? targetCompany : existing.targetCompany,
         content: content ? (typeof content === 'string' ? content : JSON.stringify(content)) : existing.content
+      },
+      include: {
+        videoAttachments: {
+          include: { video: true }
+        }
       }
     });
 
@@ -229,7 +239,12 @@ router.get('/', authenticateToken, async (req: AuthenticatedRequest, res: Respon
     const resumes = await prisma.resume.findMany({
       where: { userId },
       orderBy: { createdAt: 'desc' },
-      include: { versions: true }
+      include: {
+        versions: true,
+        videoAttachments: {
+          include: { video: true }
+        }
+      }
     });
 
     const formatted = resumes.map(r => ({
@@ -257,7 +272,12 @@ router.get('/:id/versions', authenticateToken, async (req: AuthenticatedRequest,
 
     const versions = await prisma.resumeVersion.findMany({
       where: { resumeId, userId },
-      orderBy: { createdAt: 'desc' }
+      orderBy: { createdAt: 'desc' },
+      include: {
+        videoAttachments: {
+          include: { video: true }
+        }
+      }
     });
 
     const formatted = versions.map(v => ({

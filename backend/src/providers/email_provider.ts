@@ -1,4 +1,5 @@
 import nodemailer from 'nodemailer';
+import fs from 'fs';
 
 export interface EmailSendResult {
   success: boolean;
@@ -7,6 +8,12 @@ export interface EmailSendResult {
   failureReason?: string;
   providerType: 'smtp' | 'draft_only';
   sentAt?: Date;
+}
+
+export interface EmailAttachment {
+  filename: string;
+  path?: string;
+  content?: Buffer;
 }
 
 export interface EmailProvider {
@@ -21,7 +28,7 @@ export interface EmailProvider {
     fromEmail?: string;
     reason?: string;
   };
-  sendEmail(to: string, subject: string, body: string): Promise<EmailSendResult>;
+  sendEmail(to: string, subject: string, body: string, attachments?: EmailAttachment[]): Promise<EmailSendResult>;
 }
 
 export class SmtpEmailProvider implements EmailProvider {
@@ -62,7 +69,7 @@ export class SmtpEmailProvider implements EmailProvider {
     };
   }
 
-  async sendEmail(to: string, subject: string, body: string): Promise<EmailSendResult> {
+  async sendEmail(to: string, subject: string, body: string, attachments?: EmailAttachment[]): Promise<EmailSendResult> {
     if (!this.isConfigured()) {
       return {
         success: false,
@@ -83,11 +90,18 @@ export class SmtpEmailProvider implements EmailProvider {
         }
       });
 
+      const validAttachments = (attachments || []).filter(a => a.content || (a.path && fs.existsSync(a.path)));
+
       const info = await transporter.sendMail({
         from: this.fromEmail,
         to,
         subject,
-        text: body
+        text: body,
+        attachments: validAttachments.map(a => ({
+          filename: a.filename,
+          path: a.path,
+          content: a.content
+        }))
       });
 
       return {
@@ -125,7 +139,7 @@ export class DraftOnlyEmailProvider implements EmailProvider {
     };
   }
 
-  async sendEmail(to: string, subject: string, body: string): Promise<EmailSendResult> {
+  async sendEmail(to: string, subject: string, body: string, attachments?: EmailAttachment[]): Promise<EmailSendResult> {
     return {
       success: false,
       status: 'FAILED',

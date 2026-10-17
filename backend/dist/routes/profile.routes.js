@@ -52,7 +52,7 @@ router.get('/', auth_1.authenticateToken, async (req, res) => {
 router.put('/', auth_1.authenticateToken, async (req, res) => {
     try {
         const userId = req.user.userId;
-        const { fullName, phone, location, bio, linkedinUrl, githubUrl, portfolioUrl, careerPreferences, education, experience, projects, certifications, skills } = req.body;
+        const { fullName, phone, location, bio, linkedinUrl, githubUrl, portfolioUrl, leetcodeUrl, careerPreferences, education, experience, projects, certifications, skills } = req.body;
         const updatedProfile = await db_1.prisma.profile.upsert({
             where: { userId },
             update: {
@@ -63,6 +63,7 @@ router.put('/', auth_1.authenticateToken, async (req, res) => {
                 linkedinUrl: typeof linkedinUrl === 'string' ? linkedinUrl.trim() : undefined,
                 githubUrl: typeof githubUrl === 'string' ? githubUrl.trim() : undefined,
                 portfolioUrl: typeof portfolioUrl === 'string' ? portfolioUrl.trim() : undefined,
+                leetcodeUrl: typeof leetcodeUrl === 'string' ? leetcodeUrl.trim() : undefined,
                 careerPreferences: careerPreferences ? JSON.stringify(careerPreferences) : undefined,
                 education: education ? JSON.stringify(education) : undefined,
                 experience: experience ? JSON.stringify(experience) : undefined,
@@ -78,6 +79,7 @@ router.put('/', auth_1.authenticateToken, async (req, res) => {
                 linkedinUrl: typeof linkedinUrl === 'string' ? linkedinUrl.trim() : undefined,
                 githubUrl: typeof githubUrl === 'string' ? githubUrl.trim() : undefined,
                 portfolioUrl: typeof portfolioUrl === 'string' ? portfolioUrl.trim() : undefined,
+                leetcodeUrl: typeof leetcodeUrl === 'string' ? leetcodeUrl.trim() : undefined,
                 careerPreferences: careerPreferences ? JSON.stringify(careerPreferences) : undefined,
                 education: education ? JSON.stringify(education) : undefined,
                 experience: experience ? JSON.stringify(experience) : undefined,

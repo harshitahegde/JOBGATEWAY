@@ -1,6 +1,10 @@
 "use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
+const fs_1 = __importDefault(require("fs"));
 const db_1 = require("../db");
 const auth_1 = require("../middleware/auth");
 const providers_1 = require("../providers");
@@ -273,7 +277,7 @@ router.get('/:id', auth_1.authenticateToken, async (req, res) => {
 router.post('/send', auth_1.authenticateToken, async (req, res) => {
     try {
         const userId = req.user.userId;
-        const { id, recipientEmail, recipientName, companyName, jobTitle, subject, body, applicationId } = req.body;
+        const { id, recipientEmail, recipientName, companyName, jobTitle, subject, body, applicationId, resumeId } = req.body;
         if (!recipientEmail || !subject || !body) {
             return res.status(400).json({ error: 'Recipient email, subject, and body are required.' });
         }
@@ -347,8 +351,21 @@ router.post('/send', auth_1.authenticateToken, async (req, res) => {
                 providerConfigured: false
             });
         }
-        // 4. Call real configured provider
-        const sendResult = await providers_1.providers.emailSender.sendEmail(recipientEmail.trim(), subject.trim(), body.trim());
+        // 4. Check for resume attachment if requested
+        const attachments = [];
+        if (resumeId) {
+            const resume = await db_1.prisma.resume.findFirst({
+                where: { id: parseInt(resumeId, 10), userId }
+            });
+            if (resume && resume.filePath && fs_1.default.existsSync(resume.filePath)) {
+                attachments.push({
+                    filename: resume.originalFilename || 'Resume.pdf',
+                    path: resume.filePath
+                });
+            }
+        }
+        // 5. Call real configured provider
+        const sendResult = await providers_1.providers.emailSender.sendEmail(recipientEmail.trim(), subject.trim(), body.trim(), attachments);
         if (sendResult.success && sendResult.status === 'SENT') {
             const sentRecord = await db_1.prisma.outreachEmail.update({
                 where: { id: outreachRecord.id },

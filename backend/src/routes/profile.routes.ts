@@ -54,7 +54,7 @@ router.put('/', authenticateToken, async (req: AuthenticatedRequest, res: Respon
   try {
     const userId = req.user!.userId;
     const {
-      fullName, phone, location, bio, linkedinUrl, githubUrl, portfolioUrl,
+      fullName, phone, location, bio, linkedinUrl, githubUrl, portfolioUrl, leetcodeUrl,
       careerPreferences, education, experience, projects, certifications, skills
     } = req.body;
 
@@ -68,6 +68,7 @@ router.put('/', authenticateToken, async (req: AuthenticatedRequest, res: Respon
         linkedinUrl: typeof linkedinUrl === 'string' ? linkedinUrl.trim() : undefined,
         githubUrl: typeof githubUrl === 'string' ? githubUrl.trim() : undefined,
         portfolioUrl: typeof portfolioUrl === 'string' ? portfolioUrl.trim() : undefined,
+        leetcodeUrl: typeof leetcodeUrl === 'string' ? leetcodeUrl.trim() : undefined,
         careerPreferences: careerPreferences ? JSON.stringify(careerPreferences) : undefined,
         education: education ? JSON.stringify(education) : undefined,
         experience: experience ? JSON.stringify(experience) : undefined,
@@ -83,6 +84,7 @@ router.put('/', authenticateToken, async (req: AuthenticatedRequest, res: Respon
         linkedinUrl: typeof linkedinUrl === 'string' ? linkedinUrl.trim() : undefined,
         githubUrl: typeof githubUrl === 'string' ? githubUrl.trim() : undefined,
         portfolioUrl: typeof portfolioUrl === 'string' ? portfolioUrl.trim() : undefined,
+        leetcodeUrl: typeof leetcodeUrl === 'string' ? leetcodeUrl.trim() : undefined,
         careerPreferences: careerPreferences ? JSON.stringify(careerPreferences) : undefined,
         education: education ? JSON.stringify(education) : undefined,
         experience: experience ? JSON.stringify(experience) : undefined,

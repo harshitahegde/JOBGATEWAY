@@ -6,6 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.DraftOnlyEmailProvider = exports.SmtpEmailProvider = void 0;
 exports.createEmailProvider = createEmailProvider;
 const nodemailer_1 = __importDefault(require("nodemailer"));
+const fs_1 = __importDefault(require("fs"));
 class SmtpEmailProvider {
     constructor() {
         this.providerType = 'smtp';
@@ -35,7 +36,7 @@ class SmtpEmailProvider {
             reason: 'SMTP credentials not configured in environment variables (SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS).'
         };
     }
-    async sendEmail(to, subject, body) {
+    async sendEmail(to, subject, body, attachments) {
         if (!this.isConfigured()) {
             return {
                 success: false,
@@ -54,11 +55,17 @@ class SmtpEmailProvider {
                     pass: this.pass
                 }
             });
+            const validAttachments = (attachments || []).filter(a => a.content || (a.path && fs_1.default.existsSync(a.path)));
             const info = await transporter.sendMail({
                 from: this.fromEmail,
                 to,
                 subject,
-                text: body
+                text: body,
+                attachments: validAttachments.map(a => ({
+                    filename: a.filename,
+                    path: a.path,
+                    content: a.content
+                }))
             });
             return {
                 success: true,
@@ -95,7 +102,7 @@ class DraftOnlyEmailProvider {
             reason: 'Application is operating in Draft-Only Mode. Real outbound email provider is not active.'
         };
     }
-    async sendEmail(to, subject, body) {
+    async sendEmail(to, subject, body, attachments) {
         return {
             success: false,
             status: 'FAILED',

@@ -10,6 +10,7 @@ export default function LoginPage() {
   const router = useRouter();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [rememberMe, setRememberMe] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -20,7 +21,7 @@ export default function LoginPage() {
 
     try {
       const res = await api.post('/auth/login', { email, password });
-      setAuthToken(res.data.token);
+      setAuthToken(res.data.token, rememberMe);
       router.push('/dashboard');
     } catch (err: any) {
       setError(err.response?.data?.error || 'Failed to sign in. Please check credentials.');
@@ -75,6 +76,18 @@ export default function LoginPage() {
                 className="w-full pl-11 pr-4 py-2.5 bg-slate-900/60 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition"
               />
             </div>
+          </div>
+
+          <div className="flex items-center justify-between text-xs">
+            <label className="flex items-center space-x-2 text-slate-300 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={rememberMe}
+                onChange={(e) => setRememberMe(e.target.checked)}
+                className="rounded border-slate-700 bg-slate-900/60 text-indigo-600 focus:ring-indigo-500 w-4 h-4"
+              />
+              <span>Remember me on this browser</span>
+            </label>
           </div>
 
           <button

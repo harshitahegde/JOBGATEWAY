@@ -1,4 +1,5 @@
 import { Router, Response } from 'express';
+import fs from 'fs';
 import { prisma } from '../db';
 import { authenticateToken, AuthenticatedRequest } from '../middleware/auth';
 import { providers } from '../providers';
@@ -319,7 +320,7 @@ router.get('/:id', authenticateToken, async (req: AuthenticatedRequest, res: Res
 router.post('/send', authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const userId = req.user!.userId;
-    const { id, recipientEmail, recipientName, companyName, jobTitle, subject, body, applicationId } = req.body;
+    const { id, recipientEmail, recipientName, companyName, jobTitle, subject, body, applicationId, resumeId } = req.body;
 
     if (!recipientEmail || !subject || !body) {
       return res.status(400).json({ error: 'Recipient email, subject, and body are required.' });
@@ -401,8 +402,22 @@ router.post('/send', authenticateToken, async (req: AuthenticatedRequest, res: R
       });
     }
 
-    // 4. Call real configured provider
-    const sendResult = await providers.emailSender.sendEmail(recipientEmail.trim(), subject.trim(), body.trim());
+    // 4. Check for resume attachment if requested
+    const attachments: Array<{ filename: string; path?: string }> = [];
+    if (resumeId) {
+      const resume = await prisma.resume.findFirst({
+        where: { id: parseInt(resumeId, 10), userId }
+      });
+      if (resume && resume.filePath && fs.existsSync(resume.filePath)) {
+        attachments.push({
+          filename: resume.originalFilename || 'Resume.pdf',
+          path: resume.filePath
+        });
+      }
+    }
+
+    // 5. Call real configured provider
+    const sendResult = await providers.emailSender.sendEmail(recipientEmail.trim(), subject.trim(), body.trim(), attachments);
 
     if (sendResult.success && sendResult.status === 'SENT') {
       const sentRecord = await prisma.outreachEmail.update({

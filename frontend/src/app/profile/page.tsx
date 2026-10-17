@@ -13,6 +13,7 @@ export default function ProfilePage() {
     linkedinUrl: '',
     githubUrl: '',
     portfolioUrl: '',
+    leetcodeUrl: '',
     education: [],
     experience: [],
     projects: [],
@@ -39,6 +40,7 @@ export default function ProfilePage() {
         linkedinUrl: p.linkedinUrl || '',
         githubUrl: p.githubUrl || '',
         portfolioUrl: p.portfolioUrl || '',
+        leetcodeUrl: p.leetcodeUrl || '',
         education: p.education || [],
         experience: p.experience || [],
         projects: p.projects || [],
@@ -179,6 +181,16 @@ export default function ProfilePage() {
                 type="url"
                 value={profile.portfolioUrl}
                 onChange={(e) => setProfile({ ...profile, portfolioUrl: e.target.value })}
+                className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-indigo-500"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold uppercase text-slate-500 mb-1">LeetCode Profile URL</label>
+              <input
+                type="url"
+                value={profile.leetcodeUrl}
+                placeholder="https://leetcode.com/u/yourusername"
+                onChange={(e) => setProfile({ ...profile, leetcodeUrl: e.target.value })}
                 className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-indigo-500"
               />
             </div>

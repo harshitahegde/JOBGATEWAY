@@ -161,11 +161,16 @@ router.post('/upload', auth_1.authenticateToken, handleResumeUpload, async (req,
 router.get('/versions/:versionId', auth_1.authenticateToken, async (req, res) => {
     try {
         const userId = req.user.userId;
-        const versionId = parseInt(req.params.versionId, 10);
+        const versionId = parseInt(req.params.id || req.params.versionId, 10);
         if (isNaN(versionId))
             return res.status(400).json({ error: 'Invalid version ID' });
         const version = await db_1.prisma.resumeVersion.findFirst({
-            where: { id: versionId, userId }
+            where: { id: versionId, userId },
+            include: {
+                videoAttachments: {
+                    include: { video: true }
+                }
+            }
         });
         if (!version)
             return res.status(404).json({ error: 'Resume version not found' });
@@ -200,6 +205,11 @@ router.put('/versions/:versionId', auth_1.authenticateToken, async (req, res) =>
                 targetJobTitle: targetJobTitle !== undefined ? targetJobTitle : existing.targetJobTitle,
                 targetCompany: targetCompany !== undefined ? targetCompany : existing.targetCompany,
                 content: content ? (typeof content === 'string' ? content : JSON.stringify(content)) : existing.content
+            },
+            include: {
+                videoAttachments: {
+                    include: { video: true }
+                }
             }
         });
         return res.json({
@@ -221,7 +231,12 @@ router.get('/', auth_1.authenticateToken, async (req, res) => {
         const resumes = await db_1.prisma.resume.findMany({
             where: { userId },
             orderBy: { createdAt: 'desc' },
-            include: { versions: true }
+            include: {
+                versions: true,
+                videoAttachments: {
+                    include: { video: true }
+                }
+            }
         });
         const formatted = resumes.map(r => ({
             ...r,
@@ -247,7 +262,12 @@ router.get('/:id/versions', auth_1.authenticateToken, async (req, res) => {
             return res.status(404).json({ error: 'Resume not found' });
         const versions = await db_1.prisma.resumeVersion.findMany({
             where: { resumeId, userId },
-            orderBy: { createdAt: 'desc' }
+            orderBy: { createdAt: 'desc' },
+            include: {
+                videoAttachments: {
+                    include: { video: true }
+                }
+            }
         });
         const formatted = versions.map(v => ({
             ...v,

@@ -4,9 +4,9 @@ import React, { useState, useEffect } from 'react';
 import { 
   FileText, Upload, Sparkles, Download, CheckCircle, AlertTriangle, 
   ShieldCheck, Layers, Lightbulb, Edit3, HelpCircle, 
-  Info, Check, X, FileSearch, Zap, Save, RefreshCw, Plus, Trash2, Clock, Briefcase, GraduationCap, Award, FolderGit2, ExternalLink
+  Info, Check, X, FileSearch, Zap, Save, RefreshCw, Plus, Trash2, Clock, Briefcase, GraduationCap, Award, FolderGit2, ExternalLink, Video, Play, Link2, Paperclip
 } from 'lucide-react';
-import { api } from '@/lib/api';
+import { api, getMediaUrl } from '@/lib/api';
 
 export default function ResumeBuilderPage() {
   const [resumes, setResumes] = useState<any[]>([]);
@@ -61,6 +61,14 @@ export default function ResumeBuilderPage() {
   // View mode: 'version' vs 'original'
   const [viewMode, setViewMode] = useState<'version' | 'original'>('version');
 
+  // Video attachment state
+  const [savedVideos, setSavedVideos] = useState<any[]>([]);
+  const [showAttachModal, setShowAttachModal] = useState(false);
+  const [selectedVideoToAttach, setSelectedVideoToAttach] = useState<number | null>(null);
+  const [attachScope, setAttachScope] = useState<'resume' | 'version'>('resume');
+  const [attachingVideo, setAttachingVideo] = useState(false);
+  const [detachingId, setDetachingId] = useState<number | null>(null);
+
   useEffect(() => {
     fetchResumes();
   }, []);
@@ -71,9 +79,15 @@ export default function ResumeBuilderPage() {
       const list = res.data.resumes || [];
       setResumes(list);
       if (list.length > 0) {
-        const primary = list[0];
-        setSelectedResume(primary);
-        if (primary.parsedContent) {
+        setSelectedResume((prev: any) => {
+          if (prev && prev.id) {
+            const found = list.find((r: any) => r.id === prev.id);
+            if (found) return found;
+          }
+          return list[0];
+        });
+        const primary = selectedResume && list.find((r: any) => r.id === selectedResume.id) ? selectedResume : list[0];
+        if (primary && primary.parsedContent && !originalData) {
           setOriginalData(primary.parsedContent);
           setResumeData(primary.parsedContent);
           runQualityAnalysis(primary.id, primary.parsedContent);
@@ -82,6 +96,69 @@ export default function ResumeBuilderPage() {
       }
     } catch (err) {
       console.error('Failed to fetch resumes', err);
+    }
+  };
+
+  const fetchSavedVideos = async () => {
+    try {
+      const res = await api.get('/videos');
+      setSavedVideos(res.data.videos || []);
+    } catch (err) {
+      console.error('Failed to fetch videos', err);
+    }
+  };
+
+  const handleOpenAttachModal = () => {
+    fetchSavedVideos();
+    setShowAttachModal(true);
+  };
+
+  const handleAttachVideo = async () => {
+    if (!selectedVideoToAttach || !selectedResume) return;
+    setAttachingVideo(true);
+    setErrorMsg(null);
+    try {
+      await api.post(`/videos/${selectedVideoToAttach}/attach`, {
+        resumeId: selectedResume.id,
+        resumeVersionId: attachScope === 'version' && selectedVersion ? selectedVersion.id : undefined
+      });
+      setMessage('Video pitch attached successfully to resume supplemental materials!');
+      setShowAttachModal(false);
+      setSelectedVideoToAttach(null);
+      const res = await api.get('/resumes');
+      const list = res.data.resumes || [];
+      setResumes(list);
+      const updatedResume = list.find((r: any) => r.id === selectedResume.id) || list[0];
+      setSelectedResume(updatedResume);
+      if (updatedResume) {
+        await fetchVersionsForResume(updatedResume.id);
+      }
+    } catch (err: any) {
+      setErrorMsg('Failed to attach video: ' + (err.response?.data?.error || err.message));
+    } finally {
+      setAttachingVideo(false);
+    }
+  };
+
+  const handleDetachVideo = async (attachmentId: number) => {
+    if (!confirm('Are you sure you want to detach this video from this resume? (The original video will remain in your Video Library)')) return;
+    setDetachingId(attachmentId);
+    setErrorMsg(null);
+    try {
+      await api.delete(`/videos/attachments/${attachmentId}`);
+      setMessage('Video detached from resume.');
+      const res = await api.get('/resumes');
+      const list = res.data.resumes || [];
+      setResumes(list);
+      const updatedResume = list.find((r: any) => r.id === selectedResume.id) || list[0];
+      setSelectedResume(updatedResume);
+      if (updatedResume) {
+        await fetchVersionsForResume(updatedResume.id);
+      }
+    } catch (err: any) {
+      setErrorMsg('Failed to detach video: ' + (err.response?.data?.error || err.message));
+    } finally {
+      setDetachingId(null);
     }
   };
 
@@ -335,7 +412,13 @@ export default function ResumeBuilderPage() {
   };
 
   const audit = analysisResult?.quality_audit;
-  const facts = analysisResult?.extracted_facts || originalData;
+  const facts = analysisResult?.extracted_facts || originalData || selectedResume?.parsedContent;
+  const profileLinks: any[] = facts?.profile_links || [];
+  const extractionStatus: string = facts?.link_extraction_status || (profileLinks.length > 0 ? 'success' : 'no_links_found');
+  const attachedVideos: any[] = [
+    ...(selectedResume?.videoAttachments || []),
+    ...(selectedVersion?.videoAttachments || [])
+  ].filter((att, index, self) => index === self.findIndex((t) => t.id === att.id));
 
   return (
     <div className="max-w-6xl mx-auto space-y-8 pb-16">
@@ -642,11 +725,217 @@ export default function ResumeBuilderPage() {
                   </span>
                 </div>
                 <div className="p-3 bg-slate-50 border border-slate-100 rounded-lg">
-                  <span className="font-bold uppercase text-[10px] text-slate-400 block">GitHub</span>
-                  <span className={facts?.personal_info?.github_url ? 'font-semibold text-indigo-700' : 'text-slate-400'}>
-                    {facts?.personal_info?.github_url || 'Not detected'}
+                  <span className="font-bold uppercase text-[10px] text-slate-400 block">LeetCode</span>
+                  <span className={facts?.personal_info?.leetcode_url ? 'font-semibold text-amber-700' : 'text-slate-400'}>
+                    {facts?.personal_info?.leetcode_url || 'Not detected'}
                   </span>
                 </div>
+                <div className="p-3 bg-slate-50 border border-slate-100 rounded-lg">
+                  <span className="font-bold uppercase text-[10px] text-slate-400 block">Portfolio</span>
+                  <span className={facts?.personal_info?.portfolio_url ? 'font-semibold text-indigo-700' : 'text-slate-400'}>
+                    {facts?.personal_info?.portfolio_url || 'Not detected'}
+                  </span>
+                </div>
+              </div>
+
+              {/* Detected Profile & Hyperlink Analysis Section */}
+              <div className="p-4 bg-slate-50 border border-slate-200/90 rounded-xl space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200 pb-3">
+                  <div className="flex items-center space-x-2">
+                    <Link2 className="w-4 h-4 text-indigo-600" />
+                    <h4 className="text-xs font-bold text-slate-900 uppercase">
+                      Detected Profile Links & Hyperlink Destinations ({profileLinks.length})
+                    </h4>
+                  </div>
+                  
+                  {/* Extraction Status Badge */}
+                  <span className={`inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold ${
+                    extractionStatus === 'no_links_found' 
+                      ? 'bg-amber-100 text-amber-800' 
+                      : extractionStatus === 'extraction_failed'
+                      ? 'bg-rose-100 text-rose-800'
+                      : extractionStatus === 'unsupported_format'
+                      ? 'bg-slate-200 text-slate-700'
+                      : 'bg-emerald-100 text-emerald-800'
+                  }`}>
+                    {extractionStatus === 'no_links_found' ? (
+                      <>
+                        <AlertTriangle className="w-3 h-3" />
+                        <span>No Profile URLs Detected</span>
+                      </>
+                    ) : extractionStatus === 'extraction_failed' ? (
+                      <>
+                        <AlertTriangle className="w-3 h-3" />
+                        <span>Extraction Failed</span>
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle className="w-3 h-3" />
+                        <span>Hyperlink Extraction Active</span>
+                      </>
+                    )}
+                  </span>
+                </div>
+
+                <p className="text-[11px] text-slate-500">
+                  Clickable hyperlinks and destination URLs extracted directly from document structure (PDF /URI annotations and Word XML relationships). Platform is determined strictly by the underlying destination URL hostname, accurately mapping generic anchors (e.g. "Coding Profile") to their destination.
+                </p>
+
+                {/* Developer Platform Status Checklist */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                  {/* LeetCode */}
+                  {(() => {
+                    const lcUrl = facts?.personal_info?.leetcode_url || profileLinks.find((p: any) => p.platform === 'leetcode')?.url;
+                    return (
+                      <div className={`p-2.5 rounded-lg border text-xs flex flex-col justify-between space-y-1 ${
+                        lcUrl ? 'bg-amber-50/60 border-amber-200' : 'bg-white border-slate-200'
+                      }`}>
+                        <div className="flex items-center justify-between">
+                          <span className="font-bold text-slate-800">LeetCode</span>
+                          <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                            lcUrl ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-500'
+                          }`}>
+                            {lcUrl ? 'Detected ✓' : 'Not Detected'}
+                          </span>
+                        </div>
+                        {lcUrl ? (
+                          <a
+                            href={lcUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-amber-800 hover:text-amber-900 font-medium truncate flex items-center space-x-1 text-[11px]"
+                          >
+                            <span className="truncate">{lcUrl}</span>
+                            <ExternalLink className="w-3 h-3 flex-shrink-0" />
+                          </a>
+                        ) : (
+                          <span className="text-slate-400 text-[11px]">No profile URL found</span>
+                        )}
+                      </div>
+                    );
+                  })()}
+
+                  {/* LinkedIn */}
+                  {(() => {
+                    const liUrl = facts?.personal_info?.linkedin_url || profileLinks.find((p: any) => p.platform === 'linkedin')?.url;
+                    return (
+                      <div className={`p-2.5 rounded-lg border text-xs flex flex-col justify-between space-y-1 ${
+                        liUrl ? 'bg-blue-50/60 border-blue-200' : 'bg-white border-slate-200'
+                      }`}>
+                        <div className="flex items-center justify-between">
+                          <span className="font-bold text-slate-800">LinkedIn</span>
+                          <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                            liUrl ? 'bg-blue-100 text-blue-800' : 'bg-slate-100 text-slate-500'
+                          }`}>
+                            {liUrl ? 'Detected ✓' : 'Not Detected'}
+                          </span>
+                        </div>
+                        {liUrl ? (
+                          <a
+                            href={liUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-blue-800 hover:text-blue-900 font-medium truncate flex items-center space-x-1 text-[11px]"
+                          >
+                            <span className="truncate">{liUrl}</span>
+                            <ExternalLink className="w-3 h-3 flex-shrink-0" />
+                          </a>
+                        ) : (
+                          <span className="text-slate-400 text-[11px]">No profile URL found</span>
+                        )}
+                      </div>
+                    );
+                  })()}
+
+                  {/* GitHub */}
+                  {(() => {
+                    const ghUrl = facts?.personal_info?.github_url || profileLinks.find((p: any) => p.platform === 'github')?.url;
+                    return (
+                      <div className={`p-2.5 rounded-lg border text-xs flex flex-col justify-between space-y-1 ${
+                        ghUrl ? 'bg-slate-100 border-slate-300' : 'bg-white border-slate-200'
+                      }`}>
+                        <div className="flex items-center justify-between">
+                          <span className="font-bold text-slate-800">GitHub</span>
+                          <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                            ghUrl ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-500'
+                          }`}>
+                            {ghUrl ? 'Detected ✓' : 'Not Detected'}
+                          </span>
+                        </div>
+                        {ghUrl ? (
+                          <a
+                            href={ghUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-slate-900 hover:text-indigo-600 font-medium truncate flex items-center space-x-1 text-[11px]"
+                          >
+                            <span className="truncate">{ghUrl}</span>
+                            <ExternalLink className="w-3 h-3 flex-shrink-0" />
+                          </a>
+                        ) : (
+                          <span className="text-slate-400 text-[11px]">No profile URL found</span>
+                        )}
+                      </div>
+                    );
+                  })()}
+                </div>
+
+                {/* All Extracted Destination Links List */}
+                {profileLinks.length > 0 ? (
+                  <div className="space-y-1.5 pt-1">
+                    <span className="text-[10px] font-bold uppercase text-slate-400 block">
+                      All Extracted Document Hyperlinks & Anchors ({profileLinks.length})
+                    </span>
+                    <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                      {profileLinks.map((pl: any, idx: number) => {
+                        const isUnknown = pl.platform === 'unknown';
+                        const badgeColor = 
+                          pl.platform === 'leetcode' ? 'bg-amber-100 text-amber-800 border-amber-200' :
+                          pl.platform === 'linkedin' ? 'bg-blue-100 text-blue-800 border-blue-200' :
+                          pl.platform === 'github' ? 'bg-slate-800 text-white border-slate-700' :
+                          pl.platform === 'codeforces' ? 'bg-cyan-100 text-cyan-800 border-cyan-200' :
+                          pl.platform === 'hackerrank' ? 'bg-emerald-100 text-emerald-800 border-emerald-200' :
+                          pl.platform === 'portfolio' ? 'bg-indigo-100 text-indigo-800 border-indigo-200' :
+                          'bg-slate-100 text-slate-700 border-slate-200';
+
+                        return (
+                          <div
+                            key={idx}
+                            className="flex flex-col sm:flex-row sm:items-center justify-between p-2 rounded-lg bg-white border border-slate-200 text-xs gap-1"
+                          >
+                            <div className="flex items-center space-x-2 min-w-0">
+                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase border ${badgeColor}`}>
+                                {isUnknown ? 'Unknown Platform' : pl.platform}
+                              </span>
+                              {pl.original_label && (
+                                <span className="text-slate-500 text-[11px] truncate max-w-[140px]">
+                                  Anchor: <strong className="text-slate-700 font-semibold">"{pl.original_label}"</strong>
+                                </span>
+                              )}
+                              <a
+                                href={pl.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-indigo-600 hover:underline truncate font-medium flex items-center space-x-1"
+                              >
+                                <span className="truncate max-w-[240px] sm:max-w-xs">{pl.url}</span>
+                                <ExternalLink className="w-3 h-3 flex-shrink-0" />
+                              </a>
+                            </div>
+
+                            <span className="text-[10px] text-slate-400 sm:text-right whitespace-nowrap">
+                              {pl.source === 'embedded_hyperlink' ? 'Document Hyperlink Annotation' : 'Visible Text URL'}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="p-3 bg-white border border-slate-200 rounded-lg text-center text-xs text-slate-500">
+                    No clickable hyperlinks or valid external URLs found in document text or annotations.
+                  </div>
+                )}
               </div>
 
               {/* Skills */}
@@ -688,6 +977,96 @@ export default function ResumeBuilderPage() {
                   <p className="text-xs text-amber-600 font-medium">No experience entries detected in extracted text.</p>
                 )}
               </div>
+            </div>
+
+            {/* Supplemental Video Elevator Pitch Card */}
+            <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-sm space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+                <div className="flex items-center space-x-2">
+                  <Video className="w-5 h-5 text-indigo-600" />
+                  <div>
+                    <h3 className="text-base font-bold text-slate-900">Supplemental Video Elevator Pitch</h3>
+                    <p className="text-xs text-slate-500">
+                      Attach a 60-second video introduction from your Video Library to supplement this resume.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleOpenAttachModal}
+                  className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold flex items-center space-x-1.5 transition self-start sm:self-auto shadow-xs"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Attach Video Pitch</span>
+                </button>
+              </div>
+
+              {/* Disclaimer */}
+              <div className="p-3 bg-amber-50/70 border border-amber-200/80 rounded-lg text-[11px] text-amber-800 flex items-start space-x-2">
+                <Info className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
+                <span>
+                  <strong>Supplemental Attachment Notice:</strong> Video attachments are stored with your candidate profile and resume records in JobGateway. They are used for recruiter outreach and supplemental candidate reviews, and are not embedded into generated binary PDF or DOCX downloads.
+                </span>
+              </div>
+
+              {/* Attached Videos List */}
+              {attachedVideos.length > 0 ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
+                  {attachedVideos.map((att: any) => (
+                    <div key={att.id} className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center space-x-2">
+                          <span className="px-2 py-0.5 bg-indigo-100 text-indigo-800 rounded text-[10px] font-bold uppercase">
+                            {att.resumeVersionId ? 'Version Specific' : 'Primary Resume'}
+                          </span>
+                          <span className="text-xs font-bold text-slate-800 truncate max-w-[180px]">
+                            {att.video?.title || 'Video Pitch'}
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleDetachVideo(att.id)}
+                          disabled={detachingId === att.id}
+                          className="text-xs text-rose-600 hover:text-rose-800 font-semibold flex items-center space-x-1 disabled:opacity-50"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                          <span>{detachingId === att.id ? 'Detaching...' : 'Detach'}</span>
+                        </button>
+                      </div>
+
+                      {att.video?.filePath ? (
+                        <div className="relative rounded-lg overflow-hidden bg-black aspect-video max-h-48 flex items-center justify-center">
+                          <video
+                            src={getMediaUrl(att.video.filePath)}
+                            controls
+                            className="w-full h-full object-contain"
+                          />
+                        </div>
+                      ) : (
+                        <div className="h-28 bg-slate-200 rounded-lg flex items-center justify-center text-xs text-slate-500">
+                          Video preview unavailable
+                        </div>
+                      )}
+
+                      <div className="flex items-center justify-between text-[11px] text-slate-500 pt-1 border-t border-slate-200">
+                        <span>Duration: {att.video?.duration ? `${Math.round(att.video.duration)}s` : 'Unknown'}</span>
+                        <span>Attached: {new Date(att.createdAt).toLocaleDateString()}</span>
+                      </div>
+                      {att.video?.description && (
+                        <p className="text-[11px] text-slate-600 italic">"{att.video.description}"</p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="p-6 text-center border-2 border-dashed border-slate-200 rounded-xl space-y-2">
+                  <Video className="w-8 h-8 text-slate-300 mx-auto" />
+                  <p className="text-xs text-slate-600 font-medium">No video pitch attached to this resume yet.</p>
+                  <p className="text-[11px] text-slate-400">
+                    Record a 60-second introduction in the Video Studio, then click "Attach Video Pitch" above.
+                  </p>
+                </div>
+              )}
             </div>
 
             {/* Concrete Actionable Recommendations Panel */}
@@ -1040,7 +1419,7 @@ export default function ResumeBuilderPage() {
                     />
                   </div>
                   <div>
-                    <label className="block text-[10px] font-bold uppercase text-slate-400 mb-0.5">GitHub / Portfolio URL</label>
+                    <label className="block text-[10px] font-bold uppercase text-slate-400 mb-0.5">GitHub URL</label>
                     <input
                       type="text"
                       value={resumeData.personal_info?.github_url || ''}
@@ -1048,6 +1427,22 @@ export default function ResumeBuilderPage() {
                         setResumeData({
                           ...resumeData,
                           personal_info: { ...resumeData.personal_info, github_url: e.target.value }
+                        });
+                        setUnsavedChanges(true);
+                      }}
+                      className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold uppercase text-slate-400 mb-0.5">LeetCode Profile URL</label>
+                    <input
+                      type="text"
+                      placeholder="https://leetcode.com/u/candidate"
+                      value={resumeData.personal_info?.leetcode_url || ''}
+                      onChange={(e) => {
+                        setResumeData({
+                          ...resumeData,
+                          personal_info: { ...resumeData.personal_info, leetcode_url: e.target.value }
                         });
                         setUnsavedChanges(true);
                       }}
@@ -1434,6 +1829,131 @@ export default function ResumeBuilderPage() {
                 <Download className="w-3.5 h-3.5" />
                 <span>Print Document</span>
               </button>
+            </div>
+          </div>
+        )}
+
+        {/* Attach Video Modal */}
+        {showAttachModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+            <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-5 animate-in fade-in zoom-in-95">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                <div className="flex items-center space-x-2">
+                  <Video className="w-5 h-5 text-indigo-600" />
+                  <h3 className="text-base font-bold text-slate-900">Attach Saved Video to Resume</h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowAttachModal(false)}
+                  className="p-1 text-slate-400 hover:text-slate-600 rounded-lg"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 uppercase mb-2">
+                    1. Select a Saved Video
+                  </label>
+                  {savedVideos.length > 0 ? (
+                    <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+                      {savedVideos.map((v) => (
+                        <label
+                          key={v.id}
+                          className={`flex items-start space-x-3 p-3 rounded-xl border cursor-pointer transition ${
+                            selectedVideoToAttach === v.id
+                              ? 'border-indigo-600 bg-indigo-50/50'
+                              : 'border-slate-200 hover:bg-slate-50'
+                          }`}
+                        >
+                          <input
+                            type="radio"
+                            name="videoSelect"
+                            checked={selectedVideoToAttach === v.id}
+                            onChange={() => setSelectedVideoToAttach(v.id)}
+                            className="mt-1 text-indigo-600 focus:ring-indigo-500"
+                          />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs font-bold text-slate-900 truncate">{v.title}</p>
+                            <p className="text-[11px] text-slate-500">
+                              Duration: {v.duration ? `${Math.round(v.duration)}s` : 'Unknown'} • Added: {new Date(v.createdAt).toLocaleDateString()}
+                            </p>
+                            {v.description && (
+                              <p className="text-[11px] text-slate-600 mt-0.5 truncate">{v.description}</p>
+                            )}
+                          </div>
+                        </label>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="p-4 bg-slate-50 rounded-xl text-center text-xs text-slate-500">
+                      No saved videos found in your library. Record or upload one in the Video Studio first.
+                    </div>
+                  )}
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 uppercase mb-2">
+                    2. Select Attachment Scope
+                  </label>
+                  <div className="space-y-2 text-xs">
+                    <label className="flex items-center space-x-2.5 p-2.5 rounded-lg border border-slate-200 cursor-pointer hover:bg-slate-50">
+                      <input
+                        type="radio"
+                        name="attachScope"
+                        value="resume"
+                        checked={attachScope === 'resume'}
+                        onChange={() => setAttachScope('resume')}
+                        className="text-indigo-600"
+                      />
+                      <div>
+                        <span className="font-bold text-slate-800">Primary Resume Scope</span>
+                        <span className="text-slate-500 block text-[11px]">
+                          Attaches to "{selectedResume?.title || 'Selected Resume'}" across all default views.
+                        </span>
+                      </div>
+                    </label>
+
+                    {selectedVersion && (
+                      <label className="flex items-center space-x-2.5 p-2.5 rounded-lg border border-slate-200 cursor-pointer hover:bg-slate-50">
+                        <input
+                          type="radio"
+                          name="attachScope"
+                          value="version"
+                          checked={attachScope === 'version'}
+                          onChange={() => setAttachScope('version')}
+                          className="text-indigo-600"
+                        />
+                        <div>
+                          <span className="font-bold text-slate-800">Active Version Scope</span>
+                          <span className="text-slate-500 block text-[11px]">
+                            Specifically attaches to version "{selectedVersion?.versionName || 'Current Version'}".
+                          </span>
+                        </div>
+                      </label>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end space-x-3 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setShowAttachModal(false)}
+                  className="px-4 py-2 text-xs font-semibold text-slate-600 hover:text-slate-800"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleAttachVideo}
+                  disabled={!selectedVideoToAttach || attachingVideo}
+                  className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-bold rounded-xl shadow-xs transition"
+                >
+                  {attachingVideo ? 'Attaching...' : 'Confirm Attachment'}
+                </button>
+              </div>
             </div>
           </div>
         )}

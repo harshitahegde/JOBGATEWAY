@@ -31,12 +31,15 @@ export default function OutreachPage() {
   const [recruiterName, setRecruiterName] = useState('');
   const [recruiterEmail, setRecruiterEmail] = useState('');
   const [videoUrl, setVideoUrl] = useState('');
+  const [selectedVideoId, setSelectedVideoId] = useState<string>('');
+  const [videoShareWarning, setVideoShareWarning] = useState<string | null>(null);
   const [selectedResumeId, setSelectedResumeId] = useState<string>('');
   const [selectedApplicationId, setSelectedApplicationId] = useState<string>('');
 
   // Dropdown data
   const [resumes, setResumes] = useState<any[]>([]);
   const [applications, setApplications] = useState<any[]>([]);
+  const [savedVideos, setSavedVideos] = useState<any[]>([]);
 
   // Generation & Draft State
   const [generating, setGenerating] = useState(false);
@@ -112,10 +115,36 @@ export default function OutreachPage() {
       const appRes = await api.get('/applications');
       setApplications(appRes.data.applications || []);
 
-      // 4. Fetch user's outreach drafts/records
+      // 4. Fetch saved videos for outreach pitch selection
+      const videoRes = await api.get('/videos');
+      setSavedVideos(videoRes.data.videos || []);
+
+      // 5. Fetch user's outreach drafts/records
       fetchOutreachHistory();
     } catch (err) {
       console.warn('Initial data load warning:', err);
+    }
+  };
+
+  const handleVideoSelect = (vidId: string) => {
+    setSelectedVideoId(vidId);
+    if (!vidId) {
+      setVideoUrl('');
+      setVideoShareWarning(null);
+      return;
+    }
+    const v = savedVideos.find(x => String(x.id) === vidId);
+    if (v) {
+      if (v.shareDetails?.isShareable && v.shareDetails?.shareUrl) {
+        setVideoUrl(v.shareDetails.shareUrl);
+        setVideoShareWarning(null);
+      } else {
+        setVideoUrl('');
+        setVideoShareWarning(
+          v.shareDetails?.reason ||
+          'This video is stored locally on the application server. External recruiters cannot access private server paths. Before a link can be included in emails, upload this video to a supported cloud storage provider (e.g. AWS S3 or Cloudinary).'
+        );
+      }
     }
   };
 
@@ -305,7 +334,8 @@ export default function OutreachPage() {
         companyName,
         jobTitle,
         subject: editableSubject,
-        body: editableBody
+        body: editableBody,
+        resumeId: selectedResumeId || undefined
       });
 
       if (res.data.status === 'SENT') {
@@ -614,18 +644,42 @@ export default function OutreachPage() {
           />
         </div>
 
-        {/* Video Pitch Link */}
-        <div>
-          <label className="block text-xs font-semibold uppercase text-slate-500 mb-1">
-            Video Intro Pitch URL (Optional)
+        {/* Video Pitch Selection */}
+        <div className="space-y-1.5">
+          <label className="block text-xs font-semibold uppercase text-slate-500">
+            Attach Video Elevator Pitch (Optional)
           </label>
-          <input
-            type="text"
-            placeholder="e.g. /uploads/videos/intro.webm"
-            value={videoUrl}
-            onChange={(e) => setVideoUrl(e.target.value)}
+          <select
+            value={selectedVideoId}
+            onChange={(e) => handleVideoSelect(e.target.value)}
             className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium focus:outline-none focus:border-indigo-500"
-          />
+          >
+            <option value="">-- None (Do not include a video in this outreach) --</option>
+            {savedVideos.map((v) => (
+              <option key={v.id} value={v.id}>
+                {v.title} ({v.durationSeconds}s) — {v.shareDetails?.isShareable ? '✅ Shareable link ready' : '⚠️ Local server only'}
+              </option>
+            ))}
+          </select>
+
+          {videoUrl && (
+            <div className="p-2.5 bg-emerald-50 border border-emerald-200 rounded-lg text-xs text-emerald-800 flex items-center space-x-2">
+              <Check className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+              <span>
+                Verified public video URL will be included in draft: <code className="bg-emerald-100/60 px-1 py-0.5 rounded text-[11px] font-mono">{videoUrl}</code>
+              </span>
+            </div>
+          )}
+
+          {videoShareWarning && (
+            <div className="p-2.5 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800 flex items-start space-x-2">
+              <AlertCircle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
+              <div className="space-y-1 text-[11px]">
+                <p className="font-semibold text-amber-900">Video Storage Limitation:</p>
+                <p>{videoShareWarning}</p>
+              </div>
+            </div>
+          )}
         </div>
 
         <button
@@ -730,6 +784,29 @@ export default function OutreachPage() {
                 onChange={(e) => setEditableBody(e.target.value)}
                 className="w-full px-3.5 py-3 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-800 leading-relaxed focus:outline-none focus:border-indigo-500 font-sans whitespace-pre-wrap"
               />
+            </div>
+
+            {/* Resume Attachment Verification Indicator */}
+            <div className={`p-3 rounded-lg border text-xs flex items-center justify-between ${
+              selectedResumeId 
+                ? 'bg-emerald-50/70 border-emerald-200 text-emerald-900' 
+                : 'bg-amber-50/80 border-amber-200 text-amber-900'
+            }`}>
+              {selectedResumeId ? (
+                <div className="flex items-center space-x-2">
+                  <FileText className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+                  <span>
+                    <strong>Resume Attached:</strong> {resumes.find(r => String(r.id) === selectedResumeId)?.title || 'Selected Resume'} ({resumes.find(r => String(r.id) === selectedResumeId)?.originalFilename || 'Document'})
+                  </span>
+                </div>
+              ) : (
+                <div className="flex items-start space-x-2">
+                  <AlertCircle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <strong>No Resume File Attached:</strong> The draft mentions an attached resume, but no resume file is currently selected. If you send or export this message, select a resume from the dropdown above to include the actual file attachment.
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
